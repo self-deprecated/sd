@@ -170,6 +170,8 @@ func TestMatchChangedPattern(t *testing.T) {
 		{"projects/demo/**", "projects/demo/apps/mobile/App.tsx", true},
 		{"projects/demo/packages/*/src/**", "projects/demo/packages/shared/src/index.ts", true},
 		{"projects/api/**", "projects/web/flake.nix", false},
+		{"projects/*", "projects/demo/flake.nix", false},
+		{"projects/*/flake.nix", "projects/demo/nested/flake.nix", false},
 	}
 	for _, tc := range cases {
 		if got := matchChangedPattern(tc.pattern, tc.file); got != tc.want {
