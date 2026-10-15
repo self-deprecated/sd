@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -75,18 +76,14 @@ func BuildPlan(mirrorID string, root string, cfg config.MirrorConfig, destinatio
 		return Plan{}, fmt.Errorf("mirror %s: %w", mirrorID, err)
 	}
 	// Overlay targets are exported even when the source helper file is excluded.
+	var overlays []OverlayOp
 	for _, overlay := range cfg.Overlays {
-		if overlay.From == "" || overlay.To == "" {
-			return Plan{}, fmt.Errorf("mirror %s overlay requires from and to", mirrorID)
+		op, fromAbs, err := resolveOverlay(source, overlay)
+		if err != nil {
+			return Plan{}, fmt.Errorf("mirror %s %w", mirrorID, err)
 		}
-		fromAbs := filepath.Join(source, filepath.FromSlash(overlay.From))
-		if info, err := os.Lstat(fromAbs); err != nil || !info.Mode().IsRegular() {
-			if err == nil {
-				err = fmt.Errorf("is not a regular file")
-			}
-			return Plan{}, fmt.Errorf("mirror %s overlay source %s: %w", mirrorID, overlay.From, err)
-		}
-		exportFiles[slashPath(overlay.To)] = fromAbs
+		exportFiles[op.To] = fromAbs
+		overlays = append(overlays, op)
 	}
 
 	preserve := append([]string{}, cfg.Preserve...)
@@ -96,9 +93,7 @@ func BuildPlan(mirrorID string, root string, cfg config.MirrorConfig, destinatio
 		return Plan{}, fmt.Errorf("mirror %s: %w", mirrorID, err)
 	}
 	plan := Plan{MirrorID: mirrorID, WorkspaceRoot: root, Source: source, Destination: destination, Include: include, Exclude: exclude, Preserve: preserve, Checks: cfg.Checks}
-	for _, overlay := range cfg.Overlays {
-		plan.Overlays = append(plan.Overlays, OverlayOp{From: slashPath(overlay.From), To: slashPath(overlay.To)})
-	}
+	plan.Overlays = overlays
 	for rel, srcPath := range exportFiles {
 		plan.Files = append(plan.Files, FileOp{Path: rel})
 		dstPath := filepath.Join(destination, filepath.FromSlash(rel))
@@ -125,6 +120,75 @@ func BuildPlan(mirrorID string, root string, cfg config.MirrorConfig, destinatio
 	sortOps(plan.Deletes)
 	sort.Slice(plan.Overlays, func(i, j int) bool { return plan.Overlays[i].To < plan.Overlays[j].To })
 	return plan, nil
+}
+
+// resolveOverlay validates an overlay and returns it with cleaned paths and
+// the absolute path of its source file. The source must be a regular file
+// inside the source tree and the target must stay inside the mirror and
+// outside its VCS directories.
+func resolveOverlay(source string, overlay config.MirrorOverlay) (OverlayOp, string, error) {
+	if overlay.From == "" || overlay.To == "" {
+		return OverlayOp{}, "", fmt.Errorf("overlay requires from and to")
+	}
+	from, err := cleanRelPath(overlay.From)
+	if err != nil {
+		return OverlayOp{}, "", fmt.Errorf("overlay source %w", err)
+	}
+	to, err := cleanRelPath(overlay.To)
+	if err != nil {
+		return OverlayOp{}, "", fmt.Errorf("overlay target %w", err)
+	}
+	for _, segment := range strings.Split(to, "/") {
+		if isProtectedName(segment) {
+			return OverlayOp{}, "", fmt.Errorf("overlay target %q must not be inside %s", overlay.To, segment)
+		}
+	}
+	fromAbs := filepath.Join(source, filepath.FromSlash(from))
+	info, err := os.Lstat(fromAbs)
+	if err == nil && !info.Mode().IsRegular() {
+		err = fmt.Errorf("is not a regular file")
+	}
+	if err == nil {
+		err = requireInside(source, fromAbs)
+	}
+	if err != nil {
+		return OverlayOp{}, "", fmt.Errorf("overlay source %s: %w", overlay.From, err)
+	}
+	return OverlayOp{From: from, To: to}, fromAbs, nil
+}
+
+// cleanRelPath normalises a configured relative path, accepting / or \ as
+// separators, and rejects empty, absolute, drive-qualified, and escaping paths.
+func cleanRelPath(p string) (string, error) {
+	slashed := strings.ReplaceAll(p, `\`, "/")
+	// Drive letters are rejected on every OS because configs are shared.
+	driveLetter := len(slashed) >= 2 && slashed[1] == ':'
+	if slashed == "" || strings.HasPrefix(slashed, "/") || driveLetter || filepath.IsAbs(p) || filepath.VolumeName(p) != "" {
+		return "", fmt.Errorf("%q must be a relative path", p)
+	}
+	cleaned := path.Clean(slashed)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") || !filepath.IsLocal(filepath.FromSlash(cleaned)) {
+		return "", fmt.Errorf("%q must name a file inside the tree", p)
+	}
+	return cleaned, nil
+}
+
+// requireInside returns an error unless target, with symlinks resolved, is
+// inside root.
+func requireInside(root, target string) error {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return err
+	}
+	realTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(realRoot, realTarget)
+	if err != nil || !filepath.IsLocal(rel) {
+		return fmt.Errorf("resolves outside %s", root)
+	}
+	return nil
 }
 
 // selectedFiles returns the regular files to export, keyed by relative path.
@@ -268,8 +332,16 @@ func slashPath(path string) string {
 }
 
 func isProtected(rel string) bool {
-	rel = strings.Trim(slashPath(rel), "/")
-	return rel == ".git" || strings.HasPrefix(rel, ".git/") || rel == ".jj" || strings.HasPrefix(rel, ".jj/")
+	first, _, _ := strings.Cut(strings.Trim(slashPath(rel), "/"), "/")
+	return isProtectedName(first)
+}
+
+// isProtectedName reports whether a path segment names a VCS directory,
+// allowing for case-insensitive file systems and Windows dropping trailing
+// dots and spaces.
+func isProtectedName(segment string) bool {
+	segment = strings.TrimRight(strings.ToLower(segment), ". ")
+	return segment == ".git" || segment == ".jj"
 }
 
 // matchesAny reports whether rel matches any pattern. Patterns are validated
