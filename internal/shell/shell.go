@@ -5,24 +5,30 @@ package shell
 
 import (
 	"context"
-	"errors"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
 )
 
+// abandonAfter bounds how long Run waits for the interpreter after a second
+// interrupt, since a builtin such as a terminal password read ignores
+// cancellation.
+const abandonAfter = time.Second
+
 // Run executes script in dir with env as the complete environment and args
 // as the positional parameters.
 //
-// A value received on interrupts acts like Ctrl-C in bash: the external
-// commands running at that moment are stopped and the shell exits through
-// its EXIT trap. If only builtins are running, or on a second interrupt, the
-// script stops immediately. An interrupted script returns exit status 130.
+// A value received on interrupts acts like Ctrl-C in bash: running external
+// commands stop with status 130 and every shell, including subshells and
+// background jobs, exits with status 130 at its next command, running its
+// EXIT trap. A second interrupt stops everything immediately.
 func Run(interrupts <-chan os.Signal, dir, script string, args, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(script), "sd")
 	if err != nil {
@@ -30,9 +36,10 @@ func Run(interrupts <-chan os.Signal, dir, script string, args, env []string, st
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	commands := &runningCommands{stop: stop, running: map[*runningCommand]bool{}}
+	state := &interruptState{stop: stop, running: map[*runningCommand]bool{}}
 	runner, err := interp.New(
-		interp.ExecHandlers(commands.track),
+		interp.CallHandler(state.exitWhenInterrupted),
+		interp.ExecHandlers(state.track),
 		interp.Dir(dir),
 		interp.Env(expand.ListEnviron(env...)),
 		interp.StdIO(stdin, stdout, stderr),
@@ -42,83 +49,108 @@ func Run(interrupts <-chan os.Signal, dir, script string, args, env []string, st
 		return err
 	}
 
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		for {
-			select {
-			case <-interrupts:
-				commands.interrupt()
-			case <-done:
-				return
+	result := make(chan error, 1)
+	go func() { result <- runner.Run(ctx, file) }()
+	var abandon <-chan time.Time
+	for {
+		select {
+		case err := <-result:
+			if state.wasInterrupted() {
+				return interp.ExitStatus(130)
 			}
+			return err
+		case <-interrupts:
+			if state.interrupt() {
+				abandon = time.After(abandonAfter)
+			}
+		case <-abandon:
+			return interp.ExitStatus(130)
 		}
-	}()
-
-	err = runner.Run(ctx, file)
-	if commands.wasInterrupted() {
-		return interp.ExitStatus(130)
 	}
-	return err
 }
-
-// errInterrupted halts the interpreter, which then runs the EXIT trap.
-var errInterrupted = errors.New("interrupted")
 
 type runningCommand struct {
 	cancel      context.CancelFunc
 	interrupted bool
 }
 
-// runningCommands tracks the external commands the interpreter is running.
-type runningCommands struct {
+type interruptState struct {
 	mu          sync.Mutex
 	stop        context.CancelFunc
 	running     map[*runningCommand]bool
 	interrupted bool
 }
 
-func (c *runningCommands) interrupt() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.interrupted || len(c.running) == 0 {
-		c.interrupted = true
-		c.stop()
-		return
+// interrupt stops the running external commands on the first call and
+// everything on later calls, which it reports by returning true.
+func (s *interruptState) interrupt() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.interrupted {
+		s.stop()
+		return true
 	}
-	c.interrupted = true
-	for command := range c.running {
+	s.interrupted = true
+	for command := range s.running {
 		command.interrupted = true
 		command.cancel()
 	}
+	return false
 }
 
-func (c *runningCommands) wasInterrupted() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.interrupted
+func (s *interruptState) wasInterrupted() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.interrupted
 }
 
-// track reports a command stopped by an interrupt as errInterrupted, so the
-// shell running it exits instead of continuing with the next command.
-func (c *runningCommands) track(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+// exitWhenInterrupted replaces each command after an interrupt with
+// `exit 130`, so every shell exits through its own EXIT trap. Commands run by
+// a trap are left alone so cleanup can finish.
+func (s *interruptState) exitWhenInterrupted(_ context.Context, args []string) ([]string, error) {
+	if s.wasInterrupted() && !inTrap() {
+		return []string{"exit", "130"}, nil
+	}
+	return args, nil
+}
+
+// track gives each external command its own context so an interrupt can
+// stop it, and reports a stopped command as exit status 130.
+func (s *interruptState) track(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 	return func(ctx context.Context, args []string) error {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		command := &runningCommand{cancel: cancel}
-		c.mu.Lock()
-		c.running[command] = true
-		c.mu.Unlock()
+		s.mu.Lock()
+		s.running[command] = true
+		s.mu.Unlock()
 
 		err := next(ctx, args)
 
-		c.mu.Lock()
-		delete(c.running, command)
+		s.mu.Lock()
+		delete(s.running, command)
 		interrupted := command.interrupted
-		c.mu.Unlock()
+		s.mu.Unlock()
 		if interrupted {
-			return errInterrupted
+			return interp.ExitStatus(130)
 		}
 		return err
+	}
+}
+
+// inTrap reports whether the calling goroutine is running a trap. The
+// interpreter has no public API for this, so it looks for the interpreter's
+// trap callback on the stack; TestInterruptStopsTheWholeTask covers it.
+func inTrap() bool {
+	pcs := make([]uintptr, 512)
+	frames := runtime.CallersFrames(pcs[:runtime.Callers(2, pcs)])
+	for {
+		frame, more := frames.Next()
+		if strings.HasSuffix(frame.Function, "interp.(*Runner).trapCallback") {
+			return true
+		}
+		if !more {
+			return false
+		}
 	}
 }

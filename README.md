@@ -22,7 +22,7 @@ Or with Nix: see [Nix](#nix).
 
 - Tasks inherit the environment `sd` was started with. There is no login shell, so `~/.bash_profile` and similar files are not sourced; run `sd` from the environment your tasks need (for example a devenv or `nix develop` shell).
 - `trap` supports `EXIT` and `ERR` only, and `$(trap)` does not list the parent shell's traps.
-- Ctrl-C stops the external commands that are running and the task exits through its `EXIT` trap, which runs once. If only shell builtins are running, or on a second Ctrl-C, the task stops immediately without running the trap. Either way it exits with status 130.
+- Ctrl-C works like it does in bash: running commands stop, the task (including subshells and background jobs) exits with status 130, and its `EXIT` trap runs once with `$?` set to 130. A second Ctrl-C stops everything immediately, including a trap that is still running.
 - External programs are looked up on `PATH` (with `PATHEXT` on Windows, so shims such as `npm.cmd` work).
 - On Windows, process substitution (`<( )`) is not supported, tools such as `cat`, `rm`, or `grep` must be installed and on `PATH`, and a script with a shebang cannot be executed directly: call its interpreter explicitly, for example `bash ./scripts/build.sh`.
 
