@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -429,6 +430,46 @@ func TestMirrorCommitScansDestinationContentsBeforeCommitting(t *testing.T) {
 				t.Errorf("jj commit ran although the mirror contains .env")
 			}
 			if code != 2 || !strings.Contains(stderr, "blacklist scan") || !strings.Contains(stderr, ".env: forbidden path pattern") {
+				t.Fatalf("expected blacklist usage error, code=%d stderr=%q", code, stderr)
+			}
+		})
+	}
+}
+
+// Generated files whose names have surrounding spaces or newlines must still
+// be scanned before the mirror commit.
+func TestMirrorCommitScansGeneratedFilesWithUnusualNames(t *testing.T) {
+	names := []string{"generated.txt "}
+	if runtime.GOOS != "windows" {
+		names = append(names, "multi\nline.txt")
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			mirrorRoot := filepath.Join(t.TempDir(), "mirrors")
+			dest := filepath.Join(mirrorRoot, "demo")
+			writeMirrorFixture(t, root)
+			mirrors := filepath.Join(root, ".sd", "mirrors.yaml")
+			data, err := os.ReadFile(mirrors)
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.ToSlash(filepath.Join(dest, name))
+			check := fmt.Sprintf("      - %q\n", fmt.Sprintf("printf 'token ghp_abcdefghijklmnopqrstuvwxyz0123456789' > '%s'", target))
+			write(t, mirrors, strings.Replace(string(data), "      - true\n", check, 1))
+			write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
+			write(t, filepath.Join(root, "projects", "demo", "CONTEXT.public.md"), "public")
+			write(t, filepath.Join(dest, ".jj", "repo"), "repo")
+			cli.InstallFakeJJ(t, root, "commit")
+
+			_, stderr, code := execute(t, root, "mirror", "--mirror-root", mirrorRoot, "commit", "demo", "-m", "feat: public snapshot")
+			if _, err := os.Stat(filepath.Join(dest, name)); err != nil {
+				t.Fatalf("check did not generate %q: %v (stderr %q)", name, err, stderr)
+			}
+			if _, err := os.Stat(filepath.Join(root, "fake-commit-called")); !os.IsNotExist(err) {
+				t.Errorf("jj commit ran although %q contains a token", name)
+			}
+			if code != 2 || !strings.Contains(stderr, "GitHub token") {
 				t.Fatalf("expected blacklist usage error, code=%d stderr=%q", code, stderr)
 			}
 		})

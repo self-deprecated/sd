@@ -28,18 +28,19 @@ type mirrorFlags struct {
 }
 
 type mirrorExplain struct {
-	Version     int      `json:"version"`
-	ID          string   `json:"id"`
-	Source      string   `json:"source"`
-	Destination string   `json:"destination"`
-	Bookmark    string   `json:"bookmark,omitempty"`
-	Remote      string   `json:"remote,omitempty"`
-	Visibility  string   `json:"visibility,omitempty"`
-	Include     []string `json:"include,omitempty"`
-	Exclude     []string `json:"exclude,omitempty"`
-	Preserve    []string `json:"preserve,omitempty"`
-	Overlays    any      `json:"overlays,omitempty"`
-	Checks      []string `json:"checks,omitempty"`
+	Version     int                    `json:"version"`
+	ID          string                 `json:"id"`
+	Source      string                 `json:"source"`
+	Destination string                 `json:"destination"`
+	Bookmark    string                 `json:"bookmark"`
+	Remote      string                 `json:"remote"`
+	Visibility  string                 `json:"visibility"`
+	Include     []string               `json:"include"`
+	Exclude     []string               `json:"exclude"`
+	Preserve    []string               `json:"preserve"`
+	Overlays    []config.MirrorOverlay `json:"overlays"`
+	Checks      []string               `json:"checks"`
+	Allow       []string               `json:"allow"`
 }
 
 func mirrorCommand(opts Options, st *state) *cobra.Command {
@@ -364,7 +365,7 @@ func runMirrorExplain(ctx mirrorContext, id string, opts Options, st *state) err
 	if err != nil {
 		return formatResolveError(err)
 	}
-	exp := mirrorExplain{Version: 1, ID: id, Source: cfg.Source, Destination: destination, Bookmark: cfg.Bookmark, Remote: cfg.Remote, Visibility: cfg.Visibility, Include: cfg.Include, Exclude: cfg.Exclude, Preserve: cfg.Preserve, Overlays: cfg.Overlays, Checks: cfg.Checks}
+	exp := mirrorExplain{Version: 1, ID: id, Source: cfg.Source, Destination: destination, Bookmark: cfg.Bookmark, Remote: cfg.Remote, Visibility: cfg.Visibility, Include: nonNil(cfg.Include), Exclude: nonNil(cfg.Exclude), Preserve: nonNil(cfg.Preserve), Overlays: nonNil(cfg.Overlays), Checks: nonNil(cfg.Checks), Allow: nonNil(cfg.Allow)}
 	if st.json {
 		return writeJSON(opts.Stdout, exp)
 	}
@@ -390,7 +391,7 @@ func runMirrorPlan(ctx mirrorContext, id string, opts Options, st *state, flags 
 		return writeJSON(opts.Stdout, struct {
 			Version int `json:"version"`
 			mirror.Plan
-		}{1, plan})
+		}{1, plan.ForJSON()})
 	}
 	return printPlan(opts.Stdout, plan, flags)
 }
@@ -709,3 +710,10 @@ func printSyncSummary(out io.Writer, plan mirror.Plan) {
 }
 
 var isMirrorInteractive = isInteractive
+
+func nonNil[T any](list []T) []T {
+	if list == nil {
+		return []T{}
+	}
+	return list
+}

@@ -63,16 +63,17 @@ func (JJVCS) Status(dir string) (VCSStatus, error) {
 }
 
 func (JJVCS) ChangedFiles(dir string) ([]string, error) {
-	cmd := exec.Command("jj", "diff", "--no-pager", "--name-only", "-r", "@")
+	// NUL-separated raw paths keep names with spaces or newlines intact.
+	cmd := exec.Command("jj", "diff", "--no-pager", "-r", "@", "-T", `path ++ "\0"`)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("list mirror changes: %w", err)
 	}
 	var paths []string
-	for _, line := range strings.Split(string(out), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			paths = append(paths, filepath.ToSlash(line))
+	for _, path := range strings.Split(string(out), "\x00") {
+		if path != "" {
+			paths = append(paths, filepath.ToSlash(path))
 		}
 	}
 	return paths, nil

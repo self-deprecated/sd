@@ -79,3 +79,29 @@ func TestMirrorJSONIsVersioned(t *testing.T) {
 		t.Fatalf("list = %q", stdout)
 	}
 }
+
+func TestMirrorJSONListsAreNeverNull(t *testing.T) {
+	root, mirrorRoot := mirrorJSONFixture(t)
+	config := filepath.Join(root, ".sd", "mirrors.yaml")
+	data, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, config, strings.Replace(string(data), "    overlays:\n      - from: CONTEXT.public.md\n        to: CONTEXT.md\n", "", 1))
+	cases := map[string][]string{
+		"explain": {"include", "exclude", "preserve", "overlays", "checks", "allow"},
+		"plan":    {"include", "exclude", "preserve", "files", "creates", "updates", "deletes", "overlays", "checks", "allow"},
+	}
+	for command, keys := range cases {
+		stdout, stderr, code := execute(t, root, "mirror", "--mirror-root", mirrorRoot, command, "demo", "--json")
+		var got map[string]any
+		if err := json.Unmarshal([]byte(stdout), &got); err != nil || code != 0 {
+			t.Fatalf("%s: code = %d stdout = %q stderr = %q", command, code, stdout, stderr)
+		}
+		for _, key := range keys {
+			if _, ok := got[key].([]any); !ok {
+				t.Errorf("%s: %s = %v, want a list", command, key, got[key])
+			}
+		}
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -109,7 +110,12 @@ func fakeJJ(state, mode string, args []string) int {
 			}
 			if !d.IsDir() {
 				rel, _ := filepath.Rel(dir, path)
-				fmt.Println(rel)
+				if slices.Contains(args, "-T") {
+					// Like `jj diff -T 'path ++ "\0"'`: raw names, NUL-separated.
+					fmt.Print(rel + "\x00")
+				} else {
+					fmt.Println(rel)
+				}
 			}
 			return nil
 		})

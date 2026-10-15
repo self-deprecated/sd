@@ -31,21 +31,40 @@ type Plan struct {
 	Source        string      `json:"source"`
 	Destination   string      `json:"destination"`
 	MirrorStatus  string      `json:"mirrorStatus,omitempty"`
-	Include       []string    `json:"include,omitempty"`
-	Exclude       []string    `json:"exclude,omitempty"`
-	Preserve      []string    `json:"preserve,omitempty"`
-	Files         []FileOp    `json:"files,omitempty"`
-	Creates       []FileOp    `json:"creates,omitempty"`
-	Updates       []FileOp    `json:"updates,omitempty"`
-	Deletes       []FileOp    `json:"deletes,omitempty"`
-	Overlays      []OverlayOp `json:"overlays,omitempty"`
-	Checks        []string    `json:"checks,omitempty"`
-	Allow         []string    `json:"allow,omitempty"`
+	Include       []string    `json:"include"`
+	Exclude       []string    `json:"exclude"`
+	Preserve      []string    `json:"preserve"`
+	Files         []FileOp    `json:"files"`
+	Creates       []FileOp    `json:"creates"`
+	Updates       []FileOp    `json:"updates"`
+	Deletes       []FileOp    `json:"deletes"`
+	Overlays      []OverlayOp `json:"overlays"`
+	Checks        []string    `json:"checks"`
+	Allow         []string    `json:"allow"`
 }
 
 var alwaysProtected = []string{
 	".git", ".git/**",
 	".jj", ".jj/**",
+}
+
+// ForJSON returns the plan with nil lists replaced by empty ones, so JSON
+// output always has every list.
+func (p Plan) ForJSON() Plan {
+	for _, list := range []*[]string{&p.Include, &p.Exclude, &p.Preserve, &p.Checks, &p.Allow} {
+		if *list == nil {
+			*list = []string{}
+		}
+	}
+	for _, ops := range []*[]FileOp{&p.Files, &p.Creates, &p.Updates, &p.Deletes} {
+		if *ops == nil {
+			*ops = []FileOp{}
+		}
+	}
+	if p.Overlays == nil {
+		p.Overlays = []OverlayOp{}
+	}
+	return p
 }
 
 func BuildPlan(mirrorID string, root string, cfg config.MirrorConfig, destination string) (Plan, error) {
@@ -57,6 +76,13 @@ func BuildPlan(mirrorID string, root string, cfg config.MirrorConfig, destinatio
 		source = filepath.Join(root, filepath.FromSlash(source))
 	}
 	source = filepath.Clean(source)
+	// A symlinked or missing root would export nothing, and syncing an empty
+	// export deletes the mirror's files.
+	if info, err := os.Lstat(source); err != nil {
+		return Plan{}, fmt.Errorf("mirror %s source: %w", mirrorID, err)
+	} else if !info.IsDir() {
+		return Plan{}, fmt.Errorf("mirror %s source %s must be a directory, not a symlink or file", mirrorID, source)
+	}
 	if err := requireSeparateTrees(root, source, destination); err != nil {
 		return Plan{}, fmt.Errorf("mirror %s %w", mirrorID, err)
 	}
@@ -195,17 +221,34 @@ func requireInside(root, target string) error {
 }
 
 // requireSeparateTrees returns an error when destination is, contains, or is
-// inside the workspace root or the source, comparing paths with symlinks
-// resolved.
+// inside the workspace root or the source. It compares file identities, so
+// neither symlinks nor case-insensitive file systems can disguise an overlap.
 func requireSeparateTrees(root, source, destination string) error {
-	dest := resolvePath(destination)
 	for _, other := range []struct{ name, path string }{{"workspace root", root}, {"source", source}} {
-		resolved := resolvePath(other.path)
-		if isWithin(dest, resolved) || isWithin(resolved, dest) {
+		if containsDir(other.path, destination) || containsDir(destination, other.path) {
 			return fmt.Errorf("destination %s overlaps the %s %s; mirrors must be separate checkouts outside the monorepo", destination, other.name, other.path)
 		}
 	}
 	return nil
+}
+
+// containsDir reports whether path is the directory ancestor or below it.
+// path need not exist yet.
+func containsDir(ancestor, path string) bool {
+	ancestorInfo, err := os.Stat(ancestor)
+	if err != nil {
+		return false
+	}
+	for p := resolvePath(path); ; {
+		if info, err := os.Stat(p); err == nil && os.SameFile(info, ancestorInfo) {
+			return true
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return false
+		}
+		p = parent
+	}
 }
 
 // resolvePath returns p as an absolute path with symlinks resolved in its
