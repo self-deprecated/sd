@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -697,7 +698,7 @@ func matchChangedPattern(pattern, file string) bool {
 			return strings.HasPrefix(file, prefix)
 		}
 	}
-	if ok, _ := filepath.Match(pattern, file); ok {
+	if ok, _ := path.Match(pattern, file); ok {
 		return true
 	}
 	regex := globToRegexp(pattern)

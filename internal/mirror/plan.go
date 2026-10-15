@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -228,18 +229,18 @@ func matchPattern(rel, pattern string) bool {
 	}
 	if strings.HasPrefix(pattern, "**/") {
 		tail := strings.TrimPrefix(pattern, "**/")
-		if ok, _ := filepath.Match(tail, filepath.Base(rel)); ok {
+		if ok, _ := path.Match(tail, path.Base(rel)); ok {
 			return true
 		}
 		return strings.HasSuffix(rel, "/"+tail)
 	}
 	if strings.Contains(pattern, "/") {
-		ok, _ := filepath.Match(pattern, rel)
+		ok, _ := path.Match(pattern, rel)
 		return ok
 	}
-	if ok, _ := filepath.Match(pattern, filepath.Base(rel)); ok {
+	if ok, _ := path.Match(pattern, path.Base(rel)); ok {
 		return true
 	}
-	ok, _ := filepath.Match(pattern, rel)
+	ok, _ := path.Match(pattern, rel)
 	return ok
 }
