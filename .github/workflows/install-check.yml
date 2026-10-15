@@ -1,0 +1,45 @@
+name: Install check
+
+# Installs the published release the way users do and runs a task.
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  homebrew:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: macos-latest
+    steps:
+      - run: brew install --cask self-deprecated/tap/sd
+      - run: sd --version
+      - name: Run a task
+        run: |
+          mkdir -p "$RUNNER_TEMP/demo/.sd"
+          printf 'version: 1\nproject: {id: demo, dir: .}\ntasks:\n  hello: {run: printf hello}\n' > "$RUNNER_TEMP/demo/.sd/tasks.yaml"
+          cd "$RUNNER_TEMP/demo"
+          test "$(sd hello)" = hello
+
+  scoop:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: windows-latest
+    steps:
+      - uses: MinoruSekine/setup-scoop@v5
+      - shell: pwsh
+        run: |
+          scoop bucket add self-deprecated https://github.com/self-deprecated/scoop-bucket
+          scoop install self-deprecated/sd
+          sd --version
+      - name: Run a task
+        shell: pwsh
+        run: |
+          $demo = Join-Path $env:RUNNER_TEMP demo
+          New-Item -ItemType Directory -Force (Join-Path $demo .sd) | Out-Null
+          "version: 1`nproject: {id: demo, dir: .}`ntasks:`n  hello: {run: printf hello}`n" | Set-Content (Join-Path $demo .sd/tasks.yaml)
+          Set-Location $demo
+          $out = sd hello
+          if ($out -ne 'hello') { throw "unexpected output: $out" }
