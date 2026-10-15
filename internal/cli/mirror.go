@@ -2,11 +2,12 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/self-deprecated/sd/internal/discovery"
 	"github.com/self-deprecated/sd/internal/mirror"
 	"github.com/self-deprecated/sd/internal/runner"
+	"github.com/self-deprecated/sd/internal/shell"
 	"github.com/self-deprecated/sd/internal/tui"
 )
 
@@ -566,14 +568,10 @@ func scanMirrorPlan(plan mirror.Plan, opts Options) error {
 }
 
 func runMirrorChecks(plan mirror.Plan, opts Options) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 	for _, check := range plan.Checks {
-		cmd := exec.Command("bash", "-lc", check)
-		cmd.Dir = plan.WorkspaceRoot
-		cmd.Stdout = opts.Stdout
-		cmd.Stderr = opts.Stderr
-		cmd.Stdin = opts.Stdin
-		cmd.Env = os.Environ()
-		if err := cmd.Run(); err != nil {
+		if err := shell.Run(ctx, plan.WorkspaceRoot, check, nil, os.Environ(), opts.Stdin, opts.Stdout, opts.Stderr); err != nil {
 			return err
 		}
 	}

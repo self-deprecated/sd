@@ -2,11 +2,13 @@ package runner
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -15,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/self-deprecated/sd/internal/model"
+	"github.com/self-deprecated/sd/internal/shell"
 )
 
 type Options struct {
@@ -367,18 +370,9 @@ func composeSharedScripts(project *model.Project, task model.Task) (string, erro
 }
 
 func runShell(dir, script string, args []string, env map[string]string, opts Options) error {
-	cmdArgs := []string{"-lc", script, "sd"}
-	cmdArgs = append(cmdArgs, args...)
-	cmd := exec.Command("bash", cmdArgs...)
-	cmd.Dir = dir
-	cmd.Stdout = opts.Stdout
-	cmd.Stderr = opts.Stderr
-	cmd.Stdin = opts.Stdin
-	cmd.Env = envList(env)
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-	return nil
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	return shell.Run(ctx, dir, script, args, envList(env), opts.Stdin, opts.Stdout, opts.Stderr)
 }
 
 func commandEnvironment(dir string, envFiles []string, taskEnv map[string]string) (map[string]string, error) {
