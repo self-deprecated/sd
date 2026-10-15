@@ -525,8 +525,10 @@ func quotedWord(word *syntax.Word) bool {
 	return false
 }
 
-// singleQuote quotes value for the shell. It writes an embedded quote as
-// '"'"' because the interpreter keeps the backslash of '\'' in assignments.
+// singleQuote quotes value for the shell. An embedded quote closes the
+// string, adds a double-quoted quote, and reopens it, because the
+// interpreter keeps the backslash of the backslash-escaped form in
+// assignments.
 func singleQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
