@@ -92,7 +92,7 @@ func directDynamicDispatch(args []string) bool {
 		return false
 	}
 	switch first {
-	case "help", "--help", "-h", "completion", "projects", "list", "tasks", "explain", "mirror", "__complete", "__completeNoDesc":
+	case "help", "--help", "-h", "--version", "-v", "completion", "projects", "list", "tasks", "explain", "mirror", "__complete", "__completeNoDesc":
 		return false
 	default:
 		return true
