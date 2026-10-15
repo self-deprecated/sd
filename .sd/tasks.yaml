@@ -24,6 +24,6 @@ tasks:
     desc: Cross-compile sd for every release target
     run: |
       for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
-        GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/sd || exit 1
-        echo "built $target"
+        GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o "dist/${target%/*}-${target#*/}/" ./cmd/sd || exit 1
+        echo "built dist/${target%/*}-${target#*/}"
       done
