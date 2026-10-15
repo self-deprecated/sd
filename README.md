@@ -16,6 +16,14 @@ go install github.com/self-deprecated/sd/cmd/sd@latest
 
 Or with Nix: see [Nix](#nix).
 
+## How tasks run
+
+`run` commands, shared scripts, and mirror `checks` are executed by an embedded bash-compatible interpreter ([mvdan.cc/sh](https://github.com/mvdan/sh)), so the same manifest behaves the same on Linux, macOS, and Windows and no `bash` binary is required. Bash syntax such as functions, arrays, `[[ ]]`, `(( ))`, `set -euo pipefail`, process substitution, and `trap` works.
+
+- Tasks inherit the environment `sd` was started with. There is no login shell, so `~/.bash_profile` and similar files are not sourced; run `sd` from the environment your tasks need (for example a devenv or `nix develop` shell).
+- Ctrl-C stops the task and still runs its `EXIT` trap; the task then exits with status 130.
+- External programs are looked up on `PATH` (with `PATHEXT` on Windows). On Windows, tools such as `cat`, `rm`, or `grep` must be installed and on `PATH`, and a script with a shebang cannot be executed directly: call its interpreter explicitly, for example `bash ./scripts/build.sh`.
+
 ## Common commands
 
 ```sh
@@ -245,7 +253,7 @@ tasks:
 - `danger`: require `--yes` / confirmation before running.
 - `whenChanged`: optional workspace-root glob list. If present, the task is a no-op unless changed files match one of the patterns. `sd` reads changed files from `SD_CHANGED_FILES` when set (even if empty), then `SD_CHANGE_BASE` via `jj diff --from <base> --name-only` / Git range diff, then the current working-copy diff via `jj diff --name-only` / `git diff --name-only HEAD`.
 - `depends`: other tasks to run first, written as `project:task/path`, `project:task/path choice`, or `task/path` for an aggregate task.
-- `scripts`: names of project-level shared scripts to run in order in the same Bash process immediately before `run`.
+- `scripts`: names of project-level shared scripts to run in order in the same shell immediately before `run`.
 - `options`: typed inputs used by choices and `{{template}}` rendering.
 - `choices`: named presets for one task.
 - `modes` / `defaultMode`: named run modes selected with `--mode <name>` or Tab in the picker; modes supply template `values`, env, and optional run/dir/danger overrides.
@@ -299,7 +307,7 @@ Choice fields can override or extend task fields:
 
 ### Shared scripts
 
-Project manifests can define named shell fragments once and attach them to tasks, choices, or modes. Shared scripts and the task command execute in one Bash process, so exported variables and functions remain available to the task. A failing script stops the task. Danger confirmation happens before any shared script executes.
+Project manifests can define named shell fragments once and attach them to tasks, choices, or modes. Shared scripts and the task command execute in one shell, so exported variables and functions remain available to the task. A failing script stops the task. Danger confirmation happens before any shared script executes.
 
 ```yaml
 scripts:
