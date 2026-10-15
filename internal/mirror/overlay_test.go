@@ -44,7 +44,7 @@ func TestBuildPlanRejectsOverlayTargetsOutsideTheMirror(t *testing.T) {
 		t.Run(to, func(t *testing.T) {
 			root, source, dest := overlayFixture(t)
 			cfg := config.MirrorConfig{Source: source, Overlays: []config.MirrorOverlay{{From: "CONTEXT.public.md", To: to}}}
-			plan, err := mirror.BuildPlan("app", root, cfg, dest)
+			plan, err := mirror.BuildPlan("app", source, cfg, dest)
 			if err == nil {
 				_ = mirror.ApplyPlan(plan)
 			}
@@ -61,7 +61,7 @@ func TestBuildPlanRejectsOverlaySourcesOutsideTheSource(t *testing.T) {
 	root, source, dest := overlayFixture(t)
 	for _, from := range []string{"../private.txt", `..\private.txt`, filepath.Join(root, "private.txt")} {
 		cfg := config.MirrorConfig{Source: source, Overlays: []config.MirrorOverlay{{From: from, To: "CONTEXT.md"}}}
-		if _, err := mirror.BuildPlan("app", root, cfg, dest); err == nil || !strings.Contains(err.Error(), "overlay") {
+		if _, err := mirror.BuildPlan("app", source, cfg, dest); err == nil || !strings.Contains(err.Error(), "overlay") {
 			t.Errorf("BuildPlan accepted overlay source %q (err %v)", from, err)
 		}
 	}
@@ -72,16 +72,16 @@ func TestBuildPlanRejectsOverlaySourcesOutsideTheSource(t *testing.T) {
 	write(t, filepath.Join(root, "elsewhere", "private.txt"), "private")
 	symlink(t, filepath.Join("..", "elsewhere"), filepath.Join(source, "linked"))
 	cfg := config.MirrorConfig{Source: source, Exclude: []string{"linked"}, Overlays: []config.MirrorOverlay{{From: "linked/private.txt", To: "CONTEXT.md"}}}
-	if _, err := mirror.BuildPlan("app", root, cfg, dest); err == nil || !strings.Contains(err.Error(), "overlay") {
+	if _, err := mirror.BuildPlan("app", source, cfg, dest); err == nil || !strings.Contains(err.Error(), "overlay") {
 		t.Errorf("BuildPlan accepted overlay source through a symlinked directory (err %v)", err)
 	}
 }
 
 func TestBuildPlanNormalisesOverlayPaths(t *testing.T) {
-	root, source, dest := overlayFixture(t)
+	_, source, dest := overlayFixture(t)
 	write(t, filepath.Join(source, "docs", "public.md"), "docs")
 	cfg := config.MirrorConfig{Source: source, Exclude: []string{"docs/**"}, Overlays: []config.MirrorOverlay{{From: `docs\public.md`, To: `./site\index.md`}}}
-	plan, err := mirror.BuildPlan("app", root, cfg, dest)
+	plan, err := mirror.BuildPlan("app", source, cfg, dest)
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}

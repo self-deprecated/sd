@@ -13,7 +13,7 @@ import (
 
 func TestMirrorInteractivePickerChoosesMirrorAndAction(t *testing.T) {
 	root := t.TempDir()
-	mirrorRoot := filepath.Join(root, "mirrors")
+	mirrorRoot := filepath.Join(t.TempDir(), "mirrors")
 	writeInteractiveMirrorFixture(t, root)
 	writeInteractive(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
 	writeInteractive(t, filepath.Join(root, "projects", "demo", "CONTEXT.public.md"), "public")

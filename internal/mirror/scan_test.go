@@ -18,7 +18,7 @@ func TestScanPlanFindsForbiddenPathsAndContent(t *testing.T) {
 	write(t, filepath.Join(source, "leaky.env"), "TOKEN=abcdefghijklmnopqrstuvwxyz123456")
 	write(t, filepath.Join(source, "config.ts"), `export const apiKey = "abcdefghijklmnopqrstuvwxyz123456"`)
 
-	plan, err := mirror.BuildPlan("app", root, config.MirrorConfig{Source: source, Include: []string{"**"}}, dest)
+	plan, err := mirror.BuildPlan("app", source, config.MirrorConfig{Source: source, Include: []string{"**"}}, dest)
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestScanPlanAllowsTestPrivateKeyFixtures(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "project")
 	write(t, filepath.Join(source, "redaction.test.ts"), "-----BEGIN TEST PRIVATE KEY-----\nsecret-key\n-----END TEST PRIVATE KEY-----")
-	plan, err := mirror.BuildPlan("app", root, config.MirrorConfig{Source: source, Include: []string{"**"}}, filepath.Join(root, "mirror"))
+	plan, err := mirror.BuildPlan("app", source, config.MirrorConfig{Source: source, Include: []string{"**"}}, filepath.Join(root, "mirror"))
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestScanPlanAllowsEnvExamplesAndCodeReferencesToCredentials(t *testing.T) {
 	write(t, filepath.Join(source, "src", "App.svelte"), "adminToken = localStorage.getItem(adminTokenStorageKey) ?? '';\n")
 	write(t, filepath.Join(source, "src", "purchases.ts"), "const defaultRevenueCatIOSAPIKey = \"appl_jjQlssmgYrPUZmFPbFuSyVOfPCV\";\n")
 	write(t, filepath.Join(source, "src", "client.test.ts"), "const token = \"header.payload.signature\";\n")
-	plan, err := mirror.BuildPlan("app", root, config.MirrorConfig{Source: source, Include: []string{"**"}}, filepath.Join(root, "mirror"))
+	plan, err := mirror.BuildPlan("app", source, config.MirrorConfig{Source: source, Include: []string{"**"}}, filepath.Join(root, "mirror"))
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestScanPlanAllowsOrdinaryFiles(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "project")
 	write(t, filepath.Join(source, "README.md"), "ordinary docs")
-	plan, err := mirror.BuildPlan("app", root, config.MirrorConfig{Source: source, Include: []string{"**"}}, filepath.Join(root, "mirror"))
+	plan, err := mirror.BuildPlan("app", source, config.MirrorConfig{Source: source, Include: []string{"**"}}, filepath.Join(root, "mirror"))
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}

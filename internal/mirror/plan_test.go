@@ -14,7 +14,7 @@ import (
 func TestBuildPlanSelectsFilesAppliesOverlaysAndProtectsVCS(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "projects", "demo")
-	dest := filepath.Join(root, "mirrors", "demo")
+	dest := filepath.Join(t.TempDir(), "demo")
 	write(t, filepath.Join(source, "README.md"), "new readme")
 	write(t, filepath.Join(source, "CONTEXT.public.md"), "public context")
 	write(t, filepath.Join(source, "docs", "guide", "intro.md"), "intro")
@@ -106,7 +106,7 @@ func TestBuildPlanAppliesRecursiveExcludes(t *testing.T) {
 	write(t, filepath.Join(source, "a", "private", "deeper", "pruned.txt"), "secret")
 	write(t, filepath.Join(source, "a", "public.txt"), "public")
 	cfg := config.MirrorConfig{Source: source, Exclude: []string{"**/private/*"}}
-	plan, err := mirror.BuildPlan("app", root, cfg, filepath.Join(root, "mirror"))
+	plan, err := mirror.BuildPlan("app", source, cfg, filepath.Join(root, "mirror"))
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestBuildPlanRejectsMalformedPatterns(t *testing.T) {
 		{Source: source, Exclude: []string{"docs/[z-a"}},
 		{Source: source, Preserve: []string{"build**"}},
 	} {
-		_, err := mirror.BuildPlan("app", root, cfg, filepath.Join(root, "mirror"))
+		_, err := mirror.BuildPlan("app", source, cfg, filepath.Join(root, "mirror"))
 		if err == nil || !strings.Contains(err.Error(), "pattern") {
 			t.Errorf("BuildPlan(%+v) error = %v, want pattern error", cfg, err)
 		}
@@ -143,7 +143,7 @@ func TestBuildPlanUpdatesFilesWhoseExecutableBitDiffers(t *testing.T) {
 	if err := os.Chmod(filepath.Join(source, "run.sh"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := mirror.BuildPlan("app", root, config.MirrorConfig{Source: source}, dest)
+	plan, err := mirror.BuildPlan("app", source, config.MirrorConfig{Source: source}, dest)
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -168,9 +168,38 @@ func TestBuildPlanUpdatesFilesWithSameSizeDifferentContent(t *testing.T) {
 	write(t, filepath.Join(dest, "a.txt"), "abce")
 	write(t, filepath.Join(source, "b.txt"), "short")
 	write(t, filepath.Join(dest, "b.txt"), "longer")
-	plan, err := mirror.BuildPlan("app", root, config.MirrorConfig{Source: source}, dest)
+	plan, err := mirror.BuildPlan("app", source, config.MirrorConfig{Source: source}, dest)
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
 	assertOps(t, "updates", plan.Updates, []string{"a.txt", "b.txt"})
+}
+
+func TestBuildPlanRejectsDestinationsOverlappingSourceOrWorkspace(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "mono")
+	source := filepath.Join(workspace, "projects", "demo")
+	write(t, filepath.Join(source, "README.md"), "hello")
+	write(t, filepath.Join(source, ".env"), "private")
+	cfg := config.MirrorConfig{Source: "projects/demo", Exclude: []string{".env"}}
+	dests := map[string]string{
+		"source":             source,
+		"inside source":      filepath.Join(source, "public"),
+		"inside workspace":   filepath.Join(workspace, "mirrors", "demo"),
+		"workspace":          workspace,
+		"contains source":    filepath.Join(workspace, "projects"),
+		"contains workspace": root,
+	}
+	if err := os.Symlink(source, filepath.Join(root, "alias")); err == nil {
+		dests["symlink to source"] = filepath.Join(root, "alias")
+	}
+	for name, dest := range dests {
+		plan, err := mirror.BuildPlan("demo", workspace, cfg, dest)
+		if err == nil || !strings.Contains(err.Error(), "overlaps") {
+			t.Errorf("%s: BuildPlan(%s) err = %v deletes = %v, want overlap error", name, dest, err, plan.Deletes)
+		}
+	}
+	if _, err := mirror.BuildPlan("demo", workspace, cfg, filepath.Join(root, "mirrors", "demo")); err != nil {
+		t.Fatalf("separate destination: %v", err)
+	}
 }

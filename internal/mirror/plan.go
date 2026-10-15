@@ -56,6 +56,9 @@ func BuildPlan(mirrorID string, root string, cfg config.MirrorConfig, destinatio
 		source = filepath.Join(root, filepath.FromSlash(source))
 	}
 	source = filepath.Clean(source)
+	if err := requireSeparateTrees(root, source, destination); err != nil {
+		return Plan{}, fmt.Errorf("mirror %s %w", mirrorID, err)
+	}
 	include := cfg.Include
 	if len(include) == 0 {
 		include = []string{"**"}
@@ -184,11 +187,51 @@ func requireInside(root, target string) error {
 	if err != nil {
 		return err
 	}
-	rel, err := filepath.Rel(realRoot, realTarget)
-	if err != nil || !filepath.IsLocal(rel) {
+	if !isWithin(realTarget, realRoot) {
 		return fmt.Errorf("resolves outside %s", root)
 	}
 	return nil
+}
+
+// requireSeparateTrees returns an error when destination is, contains, or is
+// inside the workspace root or the source, comparing paths with symlinks
+// resolved.
+func requireSeparateTrees(root, source, destination string) error {
+	dest := resolvePath(destination)
+	for _, other := range []struct{ name, path string }{{"workspace root", root}, {"source", source}} {
+		resolved := resolvePath(other.path)
+		if isWithin(dest, resolved) || isWithin(resolved, dest) {
+			return fmt.Errorf("destination %s overlaps the %s %s; mirrors must be separate checkouts outside the monorepo", destination, other.name, other.path)
+		}
+	}
+	return nil
+}
+
+// resolvePath returns p as an absolute path with symlinks resolved in its
+// longest existing prefix, so paths that do not exist yet can be compared.
+func resolvePath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	missing := ""
+	for current := abs; ; {
+		if real, err := filepath.EvalSymlinks(current); err == nil {
+			return filepath.Join(real, missing)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return abs
+		}
+		missing = filepath.Join(filepath.Base(current), missing)
+		current = parent
+	}
+}
+
+// isWithin reports whether path is root or inside it.
+func isWithin(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && (rel == "." || filepath.IsLocal(rel))
 }
 
 // selectedFiles returns the regular files to export, keyed by relative path.

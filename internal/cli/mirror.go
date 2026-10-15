@@ -525,7 +525,7 @@ func validateMirrorDestination(vcs mirror.VCS, id, destination string) error {
 		return err
 	}
 	if !ok {
-		return runner.UsageError{Message: fmt.Sprintf("mirror %s destination is not a jj workcopy: %s", id, destination)}
+		return runner.UsageError{Message: fmt.Sprintf("mirror %s destination is not a jj workcopy root: %s", id, destination)}
 	}
 	return nil
 }

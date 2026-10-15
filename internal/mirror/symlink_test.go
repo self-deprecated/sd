@@ -31,7 +31,7 @@ func TestBuildPlanRefusesToExportSourceSymlinks(t *testing.T) {
 	}
 	symlink(t, filepath.Join("..", "shared"), filepath.Join(source, "lib"))
 
-	_, err := mirror.BuildPlan("app", root, config.MirrorConfig{Source: source}, filepath.Join(root, "mirror"))
+	_, err := mirror.BuildPlan("app", source, config.MirrorConfig{Source: source}, filepath.Join(root, "mirror"))
 	if err == nil || !strings.Contains(err.Error(), "notes.txt") || !strings.Contains(err.Error(), "lib") || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("expected source symlink error naming notes.txt and lib, got %v", err)
 	}
@@ -43,7 +43,7 @@ func TestBuildPlanIgnoresExcludedSourceSymlinks(t *testing.T) {
 	write(t, filepath.Join(root, "private.env"), "TOKEN=private")
 	write(t, filepath.Join(source, "README.md"), "hello")
 	symlink(t, filepath.Join("..", "..", "private.env"), filepath.Join(source, ".tools", "link"))
-	plan, err := mirror.BuildPlan("app", root, config.MirrorConfig{Source: source, Exclude: []string{".tools/**"}}, filepath.Join(root, "mirror"))
+	plan, err := mirror.BuildPlan("app", source, config.MirrorConfig{Source: source, Exclude: []string{".tools/**"}}, filepath.Join(root, "mirror"))
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestBuildPlanRefusesDestinationSymlinks(t *testing.T) {
 			write(t, filepath.Join(dest, "docs", "notes.txt"), "old")
 			tc.setup(t, root, dest)
 
-			plan, err := mirror.BuildPlan("app", root, config.MirrorConfig{Source: source}, dest)
+			plan, err := mirror.BuildPlan("app", source, config.MirrorConfig{Source: source}, dest)
 			if err == nil {
 				_ = mirror.ApplyPlan(plan)
 			}
@@ -102,7 +102,7 @@ func TestBuildPlanAllowsDestinationSymlinksInPreservedPaths(t *testing.T) {
 	write(t, filepath.Join(source, "README.md"), "hello")
 	write(t, filepath.Join(root, "python"), "binary")
 	symlink(t, filepath.Join("..", "..", "..", "python"), filepath.Join(dest, ".venv", "bin", "python"))
-	plan, err := mirror.BuildPlan("app", root, config.MirrorConfig{Source: source, Preserve: []string{".venv/**"}}, dest)
+	plan, err := mirror.BuildPlan("app", source, config.MirrorConfig{Source: source, Preserve: []string{".venv/**"}}, dest)
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestApplyPlanNeverWritesOrDeletesThroughSymlinkedDirectories(t *testing.T) 
 	write(t, filepath.Join(source, "docs", "new.md"), "public")
 	write(t, filepath.Join(dest, "stale", "old.txt"), "stale")
 	write(t, filepath.Join(outside, "old.txt"), "keep me")
-	plan, err := mirror.BuildPlan("app", root, config.MirrorConfig{Source: source}, dest)
+	plan, err := mirror.BuildPlan("app", source, config.MirrorConfig{Source: source}, dest)
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}

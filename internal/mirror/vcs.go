@@ -1,7 +1,7 @@
 package mirror
 
 import (
-	"bytes"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -17,6 +17,7 @@ type TraceInfo struct {
 }
 
 type VCS interface {
+	// IsJJWorkcopy reports whether dir is the root of a jj workspace.
 	IsJJWorkcopy(dir string) (bool, error)
 	Status(dir string) (VCSStatus, error)
 	Commit(dir string, message string) error
@@ -25,15 +26,24 @@ type VCS interface {
 
 type JJVCS struct{}
 
+// IsJJWorkcopy reports whether dir is the root of a jj workspace, not merely
+// a directory somewhere inside one.
 func (JJVCS) IsJJWorkcopy(dir string) (bool, error) {
 	cmd := exec.Command("jj", "root")
 	cmd.Dir = dir
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	out, err := cmd.Output()
+	if err != nil {
 		return false, nil
 	}
-	return true, nil
+	rootInfo, err := os.Stat(strings.TrimSpace(string(out)))
+	if err != nil {
+		return false, nil
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(rootInfo, dirInfo), nil
 }
 
 func (JJVCS) Status(dir string) (VCSStatus, error) {

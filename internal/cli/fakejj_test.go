@@ -70,8 +70,20 @@ func fakeJJ(state, mode string, args []string) int {
 	}
 	switch command {
 	case "root":
-		wd, _ := os.Getwd()
-		fmt.Println(wd)
+		// Like jj, print the nearest enclosing directory that has a .jj.
+		dir, _ := os.Getwd()
+		for {
+			if info, err := os.Stat(filepath.Join(dir, ".jj")); err == nil && info.IsDir() {
+				fmt.Println(dir)
+				return 0
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				fmt.Fprintln(os.Stderr, "Error: There is no jj repo in \".\"")
+				return 1
+			}
+			dir = parent
+		}
 	case "st":
 		if mode != "" && fakeJJStatusCount(state) > 1 {
 			fmt.Println("Modified files:")

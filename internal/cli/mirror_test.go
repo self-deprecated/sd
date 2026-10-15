@@ -12,7 +12,7 @@ import (
 
 func TestMirrorCommandsUseConfigurableDestinationAndNeverPush(t *testing.T) {
 	root := t.TempDir()
-	mirrorRoot := filepath.Join(root, "mirrors")
+	mirrorRoot := filepath.Join(t.TempDir(), "mirrors")
 	dest := filepath.Join(mirrorRoot, "demo")
 	writeMirrorFixture(t, root)
 	write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
@@ -192,7 +192,7 @@ func TestMirrorListExplainJSONAndDestinationPrecedence(t *testing.T) {
 
 func TestMirrorCommitCreatesLocalCommitAndDoesNotPush(t *testing.T) {
 	root := t.TempDir()
-	mirrorRoot := filepath.Join(root, "mirrors")
+	mirrorRoot := filepath.Join(t.TempDir(), "mirrors")
 	dest := filepath.Join(mirrorRoot, "demo")
 	writeMirrorFixture(t, root)
 	write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
@@ -223,7 +223,7 @@ func TestMirrorCommitCreatesLocalCommitAndDoesNotPush(t *testing.T) {
 
 func TestMirrorCommitWarnsWhenTraceTrailersCannotBeAdded(t *testing.T) {
 	root := t.TempDir()
-	mirrorRoot := filepath.Join(root, "mirrors")
+	mirrorRoot := filepath.Join(t.TempDir(), "mirrors")
 	dest := filepath.Join(mirrorRoot, "demo")
 	writeMirrorFixture(t, root)
 	write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
@@ -249,7 +249,7 @@ func TestMirrorCommitWarnsWhenTraceTrailersCannotBeAdded(t *testing.T) {
 
 func TestMirrorPublishCreatesLocalCommitAndDoesNotPush(t *testing.T) {
 	root := t.TempDir()
-	mirrorRoot := filepath.Join(root, "mirrors")
+	mirrorRoot := filepath.Join(t.TempDir(), "mirrors")
 	dest := filepath.Join(mirrorRoot, "demo")
 	writeMirrorFixture(t, root)
 	write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
@@ -271,7 +271,7 @@ func TestMirrorPublishCreatesLocalCommitAndDoesNotPush(t *testing.T) {
 
 func TestMirrorCommitRequiresMessageAndNoopsWhenClean(t *testing.T) {
 	root := t.TempDir()
-	mirrorRoot := filepath.Join(root, "mirrors")
+	mirrorRoot := filepath.Join(t.TempDir(), "mirrors")
 	dest := filepath.Join(mirrorRoot, "demo")
 	writeMirrorFixture(t, root)
 	write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
@@ -355,5 +355,42 @@ func assertContent(t *testing.T, path, want string) {
 	}
 	if string(data) != want {
 		t.Fatalf("%s = %q want %q", path, string(data), want)
+	}
+}
+
+func TestMirrorSyncRequiresDestinationToBeAJJWorkspaceRoot(t *testing.T) {
+	root := t.TempDir()
+	mirrorRoot := filepath.Join(t.TempDir(), "mirrors")
+	dest := filepath.Join(mirrorRoot, "demo")
+	writeMirrorFixture(t, root)
+	write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
+	write(t, filepath.Join(root, "projects", "demo", "CONTEXT.public.md"), "public")
+	// The destination is only a subdirectory of some other jj workspace.
+	write(t, filepath.Join(mirrorRoot, ".jj", "repo"), "repo")
+	write(t, filepath.Join(dest, "placeholder"), "")
+	cli.InstallFakeJJ(t, root, "")
+
+	_, stderr, code := execute(t, root, "mirror", "--mirror-root", mirrorRoot, "sync", "demo")
+	if code != 2 || !strings.Contains(stderr, "not a jj workcopy root") {
+		t.Fatalf("expected jj workcopy root error, code=%d stderr=%q", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "README.md")); !os.IsNotExist(err) {
+		t.Fatalf("sync modified a destination that is not a workspace root, stat err=%v", err)
+	}
+}
+
+func TestMirrorPlanRejectsDestinationOverlappingTheMonorepo(t *testing.T) {
+	root := t.TempDir()
+	writeMirrorFixture(t, root)
+	write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
+	write(t, filepath.Join(root, "projects", "demo", "CONTEXT.public.md"), "public")
+	cli.InstallFakeJJ(t, root, "")
+
+	// --mirror-root projects makes the destination the source itself.
+	for _, mirrorRoot := range []string{filepath.Join(root, "projects"), filepath.Join(root, "mirrors")} {
+		stdout, stderr, code := execute(t, root, "mirror", "--mirror-root", mirrorRoot, "plan", "demo", "--json")
+		if code == 0 || !strings.Contains(stderr, "overlaps") {
+			t.Errorf("mirror root %s: expected overlap error, code=%d stdout=%s stderr=%q", mirrorRoot, code, stdout, stderr)
+		}
 	}
 }

@@ -169,6 +169,8 @@ Mirrors export regular files only. A symlink or special file that would be expor
 
 `sync` updates the local mirror but does not commit. `commit` and `publish` sync and create a local jj commit in the mirror. No `sd mirror` command pushes upstream; review the mirror and push manually when ready.
 
+The destination must be the root of its own jj workspace, outside the monorepo: a destination that is, contains, or is inside the workspace root or the mirrored Project is rejected.
+
 If a required destination root is missing, `sd mirror` errors with setup instructions. If a destination mirror has uncommitted local changes, interactive runs warn and ask whether to continue; non-interactive runs require `--yes`.
 
 ## Shell completions
