@@ -16,10 +16,16 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// abandonAfter bounds how long Run waits for the interpreter to stop after an
-// interrupt, since a builtin such as a silent terminal read ignores
-// cancellation.
-const abandonAfter = time.Second
+const (
+	// killAfter is how long a command has to exit after the interrupt
+	// signal before it is killed.
+	killAfter = 2 * time.Second
+	// abandonAfter bounds how long Run waits for the interpreter to stop
+	// after an interrupt, since a builtin such as a silent terminal read
+	// ignores cancellation. It outlasts killAfter so commands are killed
+	// before Run returns.
+	abandonAfter = killAfter + time.Second
+)
 
 // Run executes script in dir with env as the complete environment and args
 // as the positional parameters.
@@ -33,6 +39,9 @@ func Run(interrupts <-chan os.Signal, dir, script string, args, env []string, st
 		return err
 	}
 	runner, err := interp.New(
+		interp.ExecHandlers(func(interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+			return interp.DefaultExecHandler(killAfter)
+		}),
 		interp.Dir(dir),
 		interp.Env(expand.ListEnviron(env...)),
 		interp.StdIO(stdin, stdout, stderr),

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -12,10 +14,19 @@ import (
 
 // The test binary doubles as a portable external command for scripts:
 // `SD_SHELL_HELPER=1 "$TESTBIN" sleep <seconds>`.
+// `SD_SHELL_HELPER=1 "$TESTBIN" ignore-interrupt <pidfile>` ignores SIGINT,
+// writes its PID, and sleeps.
 func TestMain(m *testing.M) {
-	if os.Getenv("SD_SHELL_HELPER") == "1" && len(os.Args) == 3 && os.Args[1] == "sleep" {
-		d, _ := time.ParseDuration(os.Args[2] + "s")
-		time.Sleep(d)
+	if os.Getenv("SD_SHELL_HELPER") == "1" && len(os.Args) == 3 {
+		switch os.Args[1] {
+		case "sleep":
+			d, _ := time.ParseDuration(os.Args[2] + "s")
+			time.Sleep(d)
+		case "ignore-interrupt":
+			signal.Ignore(os.Interrupt)
+			_ = os.WriteFile(os.Args[2], []byte(strconv.Itoa(os.Getpid())), 0o644)
+			time.Sleep(30 * time.Second)
+		}
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
