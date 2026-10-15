@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -116,7 +117,7 @@ func firstNonGlobalFlag(args []string) string {
 			i++
 			continue
 		default:
-			if strings.HasPrefix(args[i], "--mode=") || strings.HasPrefix(args[i], "--log-file=") || strings.HasPrefix(args[i], "--var=") {
+			if name, _, ok := strings.Cut(args[i], "="); ok && slices.Contains([]string{"--json", "--yes", "-y", "--mode", "--log-file", "--var"}, name) {
 				continue
 			}
 			return args[i]

@@ -415,7 +415,7 @@ func RenderTemplate(input string, values map[string]string) string {
 // The script is parsed to find each placeholder's quoting context: inside
 // single quotes the reference is spliced in by closing and reopening them,
 // and in comments and quoted here-documents, which the shell does not
-// expand, the value is written as text.
+// expand, the placeholder is left as written.
 func ShellCommand(template string, values map[string]string) string {
 	type placeholder struct {
 		start, end int
@@ -486,7 +486,9 @@ func ShellCommand(template string, values map[string]string) string {
 		body.WriteString(template[last:p.start])
 		last = p.end
 		if _, ok := within(literal, p.start); ok {
-			body.WriteString(values[p.key])
+			// The shell does not expand here; inserting the value could
+			// end the comment or here-document early.
+			body.WriteString(template[p.start:p.end])
 			continue
 		}
 		ref, ok := refs[p.key]

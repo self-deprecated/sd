@@ -97,3 +97,12 @@ func TestArgumentCountErrorsAreUsageErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestBooleanFlagValuesBeforeSubcommands(t *testing.T) {
+	root := flagsWorkspace(t)
+	for _, args := range [][]string{{"--json=true", "tasks"}, {"--yes=false", "tasks"}, {"-y=1", "projects"}} {
+		if _, stderr, code := execute(t, root, args...); code != 0 {
+			t.Fatalf("%v: code = %d stderr = %q", args, code, stderr)
+		}
+	}
+}

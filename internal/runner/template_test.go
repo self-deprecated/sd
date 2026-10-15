@@ -20,7 +20,9 @@ func TestRuntimeValuesAreNeverParsedAsShellCode(t *testing.T) {
 		{"apostrophe in a comment", "# Don't change the greeting.\nprintf '%s' '{{message}}'", `hello`, `hello`},
 		{"single quotes inside a command substitution", `printf '%s' "$(printf '%s' '{{message}}')"`, `hello`, `hello`},
 		{"ansi-c quotes", `printf '%s' $'[{{message}}]\t'`, `it's`, "[it's]\t"},
-		{"quoted heredoc gets the text", "cat <<'EOF'\n{{message}}\nEOF", `$(printf x)`, "$(printf x)\n"},
+		{"quoted heredoc keeps the placeholder", "cat <<'EOF'\n{{message}}\nEOF", `$(printf x)`, "{{message}}\n"},
+		{"newline in a comment", "# {{message}}\nprintf SAFE", "hello\nprintf INJECTED\n#", "SAFE"},
+		{"delimiter in a quoted heredoc", "cat <<'EOF'\n{{message}}\nEOF", "hello\nEOF\nprintf INJECTED\ncat <<'EOF'\n", "{{message}}\n"},
 		{"unquoted heredoc", "cat <<EOF\n[{{message}}]\nEOF", `$(printf x)`, "[$(printf x)]\n"},
 	}
 	for _, tc := range cases {

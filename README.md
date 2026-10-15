@@ -113,7 +113,7 @@ sd explain example deploy --var target=prod --var message="ship it" --json
 
 Values resolve in this order, later winning: option defaults, variables derived from the selected enum values (`vars:`), choice values, mode values, and finally `--var`. If two selected values derive different values for the same variable, the task fails rather than picking one. Referenced inputs without a default are required unless `required: false` is set.
 
-Values are never parsed as shell code. In `run`, each `{{name}}` expands to a shell variable holding the value, so `--var 'message=$(rm -rf ~)'` stays literal text whether the placeholder is double-quoted, single-quoted, or unquoted. An unquoted placeholder still splits into words, which keeps suffixes such as `publish{{publishArgs}}` with `publishArgs: " --dry-run"` working. Placeholders inside a quoted here-document (`<<'EOF'`) are not expanded. `explain` shows the command with values substituted for readability. In `dir`, `env`, and `envFiles` the value is substituted as text.
+Values are never parsed as shell code. In `run`, each `{{name}}` expands to a shell variable holding the value, so `--var 'message=$(rm -rf ~)'` stays literal text whether the placeholder is double-quoted, single-quoted, or unquoted. An unquoted placeholder still splits into words, which keeps suffixes such as `publish{{publishArgs}}` with `publishArgs: " --dry-run"` working. Placeholders in comments and quoted here-documents (`<<'EOF'`), where the shell does not expand anything, are left as written. `explain` shows the command with values substituted for readability. In `dir`, `env`, and `envFiles` the value is substituted as text.
 
 ## JSON for agents
 
