@@ -18,7 +18,7 @@ func TestMirrorInteractivePickerChoosesMirrorAndAction(t *testing.T) {
 	writeInteractive(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
 	writeInteractive(t, filepath.Join(root, "projects", "demo", "CONTEXT.public.md"), "public")
 	writeInteractive(t, filepath.Join(mirrorRoot, "demo", ".jj", "repo"), "repo")
-	installInteractiveFakeJJ(t, root)
+	InstallFakeJJ(t, root, "")
 
 	oldInteractive := isMirrorInteractive
 	isMirrorInteractive = func(stdin io.Reader, stdout io.Writer) bool { return true }
@@ -97,31 +97,4 @@ func writeInteractive(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func installInteractiveFakeJJ(t *testing.T, root string) {
-	t.Helper()
-	bin := filepath.Join(root, "bin-interactive")
-	if err := os.MkdirAll(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	fake := filepath.Join(bin, "jj")
-	content := `#!/usr/bin/env bash
-set -euo pipefail
-case "${1:-}" in
-  root)
-    pwd
-    ;;
-  st)
-    echo "The working copy has no changes."
-    ;;
-  log)
-    echo "abc def"
-    ;;
-esac
-`
-	if err := os.WriteFile(fake, []byte(content), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

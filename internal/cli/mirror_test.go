@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/self-deprecated/sd/internal/cli"
 )
 
 func TestMirrorCommandsUseConfigurableDestinationAndNeverPush(t *testing.T) {
@@ -16,7 +18,7 @@ func TestMirrorCommandsUseConfigurableDestinationAndNeverPush(t *testing.T) {
 	write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
 	write(t, filepath.Join(root, "projects", "demo", "CONTEXT.public.md"), "public")
 	write(t, filepath.Join(dest, ".jj", "repo"), "repo")
-	installFakeJJ(t, root)
+	cli.InstallFakeJJ(t, root, "")
 
 	t.Run("list does not require local path resolution", func(t *testing.T) {
 		stdout, stderr, code := execute(t, root, "mirror", "list")
@@ -196,7 +198,7 @@ func TestMirrorCommitCreatesLocalCommitAndDoesNotPush(t *testing.T) {
 	write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
 	write(t, filepath.Join(root, "projects", "demo", "CONTEXT.public.md"), "public")
 	write(t, filepath.Join(dest, ".jj", "repo"), "repo")
-	installFakeJJForCommit(t, root)
+	cli.InstallFakeJJ(t, root, "commit")
 
 	stdout, stderr, code := execute(t, root, "mirror", "--mirror-root", mirrorRoot, "commit", "demo", "-m", "feat: public snapshot")
 	if code != 0 {
@@ -227,7 +229,7 @@ func TestMirrorCommitWarnsWhenTraceTrailersCannotBeAdded(t *testing.T) {
 	write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
 	write(t, filepath.Join(root, "projects", "demo", "CONTEXT.public.md"), "public")
 	write(t, filepath.Join(dest, ".jj", "repo"), "repo")
-	installFakeJJForTraceFailure(t, root)
+	cli.InstallFakeJJ(t, root, "trace-failure")
 
 	_, stderr, code := execute(t, root, "mirror", "--mirror-root", mirrorRoot, "commit", "demo", "-m", "feat: public snapshot")
 	if code != 0 {
@@ -253,7 +255,7 @@ func TestMirrorPublishCreatesLocalCommitAndDoesNotPush(t *testing.T) {
 	write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
 	write(t, filepath.Join(root, "projects", "demo", "CONTEXT.public.md"), "public")
 	write(t, filepath.Join(dest, ".jj", "repo"), "repo")
-	installFakeJJForCommit(t, root)
+	cli.InstallFakeJJ(t, root, "commit")
 
 	stdout, stderr, code := execute(t, root, "mirror", "--mirror-root", mirrorRoot, "publish", "demo", "-m", "feat: public publish")
 	if code != 0 {
@@ -275,7 +277,7 @@ func TestMirrorCommitRequiresMessageAndNoopsWhenClean(t *testing.T) {
 	write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
 	write(t, filepath.Join(root, "projects", "demo", "CONTEXT.public.md"), "public")
 	write(t, filepath.Join(dest, ".jj", "repo"), "repo")
-	installFakeJJ(t, root)
+	cli.InstallFakeJJ(t, root, "")
 
 	_, stderr, code := execute(t, root, "mirror", "--mirror-root", mirrorRoot, "commit", "demo")
 	if code != 2 || !strings.Contains(stderr, "requires -m/--message") {
@@ -301,7 +303,7 @@ func TestMirrorInitWritesIgnoredLocalConfig(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr)
 	}
-	if !strings.Contains(stdout, ".sd/mirrors.local.yaml") {
+	if !strings.Contains(stdout, filepath.Join(".sd", "mirrors.local.yaml")) {
 		t.Fatalf("unexpected stdout: %q", stdout)
 	}
 	assertContent(t, filepath.Join(root, ".sd", "mirrors.local.yaml"), "version: 1\n\npaths:\n  public-mirrors: /tmp/public-mirrors\n")
@@ -343,129 +345,6 @@ tasks:
     desc: Check
     run: true
 `)
-}
-
-func installFakeJJ(t *testing.T, root string) {
-	t.Helper()
-	bin := filepath.Join(root, "bin")
-	if err := os.MkdirAll(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	fake := filepath.Join(bin, "jj")
-	content := `#!/usr/bin/env bash
-set -euo pipefail
-case "${1:-}" in
-  root)
-    pwd
-    ;;
-  st)
-    echo "The working copy has no changes."
-    ;;
-  log)
-    echo "abc def"
-    ;;
-  commit)
-    echo "$@" >> "` + filepath.ToSlash(filepath.Join(root, "fake-commit-called")) + `"
-    ;;
-  git)
-    if [ "${2:-}" = "push" ]; then
-      touch "` + filepath.ToSlash(filepath.Join(root, "fake-push-called")) + `"
-      exit 99
-    fi
-    ;;
-esac
-`
-	if err := os.WriteFile(fake, []byte(content), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
-
-func installFakeJJForCommit(t *testing.T, root string) {
-	t.Helper()
-	bin := filepath.Join(root, "bin-commit")
-	if err := os.MkdirAll(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	fake := filepath.Join(bin, "jj")
-	content := `#!/usr/bin/env bash
-set -euo pipefail
-case "${1:-}" in
-  root)
-    pwd
-    ;;
-  st)
-    counter="` + filepath.ToSlash(filepath.Join(root, "fake-status-count")) + `"
-    count=0
-    if [ -f "$counter" ]; then count=$(cat "$counter"); fi
-    count=$((count + 1))
-    echo "$count" > "$counter"
-    if [ "$count" = "1" ]; then
-      echo "The working copy has no changes."
-    else
-      echo "Modified files:"
-      echo "M README.md"
-    fi
-    ;;
-  log)
-    echo "abc def"
-    ;;
-  commit)
-    printf '%s\n' "$*" >> "` + filepath.ToSlash(filepath.Join(root, "fake-commit-called")) + `"
-    ;;
-  git)
-    if [ "${2:-}" = "push" ]; then
-      touch "` + filepath.ToSlash(filepath.Join(root, "fake-push-called")) + `"
-      exit 99
-    fi
-    ;;
-esac
-`
-	if err := os.WriteFile(fake, []byte(content), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
-
-func installFakeJJForTraceFailure(t *testing.T, root string) {
-	t.Helper()
-	bin := filepath.Join(root, "bin-trace-failure")
-	if err := os.MkdirAll(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	fake := filepath.Join(bin, "jj")
-	content := `#!/usr/bin/env bash
-set -euo pipefail
-case "${1:-}" in
-  root)
-    pwd
-    ;;
-  st)
-    counter="` + filepath.ToSlash(filepath.Join(root, "fake-status-count")) + `"
-    count=0
-    if [ -f "$counter" ]; then count=$(cat "$counter"); fi
-    count=$((count + 1))
-    echo "$count" > "$counter"
-    if [ "$count" = "1" ]; then
-      echo "The working copy has no changes."
-    else
-      echo "Modified files:"
-      echo "M README.md"
-    fi
-    ;;
-  log)
-    echo "trace unavailable" >&2
-    exit 42
-    ;;
-  commit)
-    printf '%s\n' "$*" >> "` + filepath.ToSlash(filepath.Join(root, "fake-commit-called")) + `"
-    ;;
-esac
-`
-	if err := os.WriteFile(fake, []byte(content), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func assertContent(t *testing.T, path, want string) {
