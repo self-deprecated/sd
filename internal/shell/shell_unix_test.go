@@ -63,3 +63,15 @@ func TestScriptsWithoutShebangGetArgsAndExportedEnv(t *testing.T) {
 		t.Fatalf("out = %q err = %v", out, err)
 	}
 }
+
+func TestScriptsWithoutShebangDoNotSeeUnsetVariables(t *testing.T) {
+	t.Setenv("SD_TEST_INHERITED", "old")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "script"), []byte(`printf '%s' "${SD_TEST_INHERITED-absent}"`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, fmt.Sprintf(`cd %q && unset SD_TEST_INHERITED && ./script`, dir))
+	if err != nil || out != "absent" {
+		t.Fatalf("out = %q err = %v", out, err)
+	}
+}

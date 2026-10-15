@@ -132,13 +132,21 @@ func shellScript(ctx context.Context, name string) ([]byte, bool) {
 	if err != nil {
 		return nil, false
 	}
-	content, err := os.ReadFile(path)
-	if err != nil || bytes.HasPrefix(content, []byte("#!")) {
+	file, err := os.Open(path)
+	if err != nil {
 		return nil, false
 	}
+	defer file.Close()
+	header := make([]byte, 512)
+	n, _ := io.ReadFull(file, header)
+	header = header[:n]
 	// Like bash, treat a null byte before the first newline as a binary.
-	line, _, _ := bytes.Cut(content, []byte("\n"))
-	if bytes.IndexByte(line, 0) >= 0 {
+	line, _, _ := bytes.Cut(header, []byte("\n"))
+	if bytes.HasPrefix(header, []byte("#!")) || bytes.IndexByte(line, 0) >= 0 {
+		return nil, false
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
 		return nil, false
 	}
 	return content, true
@@ -153,11 +161,18 @@ func (c *commandTracker) runScript(ctx context.Context, script []byte, args []st
 		fmt.Fprintln(hc.Stderr, err)
 		return interp.ExitStatus(2)
 	}
-	var env []string
+	// Later bindings override earlier ones; unset removes an inherited one.
+	exported := map[string]string{}
 	for name, vr := range hc.Env.Each {
-		if vr.Exported && vr.IsSet() {
-			env = append(env, name+"="+vr.String())
+		if !vr.IsSet() {
+			delete(exported, name)
+		} else if vr.Exported && vr.Kind == expand.String {
+			exported[name] = vr.String()
 		}
+	}
+	var env []string
+	for name, value := range exported {
+		env = append(env, name+"="+value)
 	}
 	runner, err := interp.New(
 		interp.ExecHandlers(c.track),
