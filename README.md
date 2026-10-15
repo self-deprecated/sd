@@ -10,6 +10,23 @@ It discovers `.sd/tasks.yaml` manifests from the current directory upward, so it
 
 ## Install
 
+macOS or Linux with [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask self-deprecated/tap/sd
+```
+
+Windows with [Scoop](https://scoop.sh):
+
+```powershell
+scoop bucket add self-deprecated https://github.com/self-deprecated/scoop-bucket
+scoop install self-deprecated/sd
+```
+
+The fully qualified names matter: Homebrew and Scoop's main bucket both carry an unrelated `sd` (a find-and-replace tool).
+
+With Go, or from the archives on the [releases page](https://github.com/self-deprecated/sd/releases), which include shell completions:
+
 ```sh
 go install github.com/self-deprecated/sd/cmd/sd@latest
 ```
@@ -110,6 +127,8 @@ JSON output is versioned. Every document has `"version": 1`; fields are always p
 
 - `projects --json`: `{"version": 1, "projects": [{"id", "name", "aliases", "workArea", "visibility", "path"}]}`.
 - `tasks --json`: `{"version": 1, "tasks": [{"project", "id", "choice", "desc", "danger", "modes", "defaultMode"}]}`. A task with choices has one row without a choice and one per choice; `project` is empty for workspace aggregates; `danger` is the danger under the default mode.
+- `mirror list --json`: `{"version": 1, "mirrors": [{"id", "visibility"}]}`; `mirror explain --json` and `mirror plan --json` add `"version": 1` to the mirror configuration and plan.
+- `mirror check --json`: `{"version": 1, "mirror", "passed", "exportedFiles", "findings": [{"path", "reason"}]}`. Output from configured checks goes to stderr; the exit status is non-zero when the check fails.
 - `explain --json`:
 
 ```json
