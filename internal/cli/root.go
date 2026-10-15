@@ -15,6 +15,7 @@ import (
 	"github.com/self-deprecated/sd/internal/discovery"
 	"github.com/self-deprecated/sd/internal/model"
 	"github.com/self-deprecated/sd/internal/runner"
+	"github.com/self-deprecated/sd/internal/shell"
 	"github.com/self-deprecated/sd/internal/tui"
 )
 
@@ -63,10 +64,7 @@ func Execute(opts Options) int {
 		filteredArgs := parseDynamicFlags(opts.Args, st)
 		if err := runRoot(optsWithArgs(opts, filteredArgs), st, filteredArgs); err != nil {
 			fmt.Fprintln(opts.Stderr, err)
-			if runner.IsUsage(err) || errors.Is(err, discovery.ErrNoWorkspace) {
-				return 2
-			}
-			return 1
+			return exitCode(err)
 		}
 		return 0
 	}
@@ -78,12 +76,21 @@ func Execute(opts Options) int {
 	cmd.SilenceErrors = true
 	if err := cmd.Execute(); err != nil {
 		fmt.Fprintln(opts.Stderr, err)
-		if runner.IsUsage(err) || errors.Is(err, discovery.ErrNoWorkspace) {
-			return 2
-		}
-		return 1
+		return exitCode(err)
 	}
 	return 0
+}
+
+// exitCode is a failed task's own exit status, 2 for usage errors, and 1 for
+// anything else.
+func exitCode(err error) int {
+	if status, ok := shell.ExitStatus(err); ok {
+		return status
+	}
+	if runner.IsUsage(err) || errors.Is(err, discovery.ErrNoWorkspace) {
+		return 2
+	}
+	return 1
 }
 
 func directDynamicDispatch(args []string) bool {
@@ -104,11 +111,11 @@ func firstNonGlobalFlag(args []string) string {
 		switch args[i] {
 		case "--json", "--yes", "-y":
 			continue
-		case "--mode", "--log-file":
+		case "--mode", "--log-file", "--var":
 			i++
 			continue
 		default:
-			if strings.HasPrefix(args[i], "--mode=") || strings.HasPrefix(args[i], "--log-file=") {
+			if strings.HasPrefix(args[i], "--mode=") || strings.HasPrefix(args[i], "--log-file=") || strings.HasPrefix(args[i], "--var=") {
 				continue
 			}
 			return args[i]
@@ -117,48 +124,55 @@ func firstNonGlobalFlag(args []string) string {
 	return ""
 }
 
+// parseDynamicFlags removes sd's own flags from args before task dispatch.
+// Everything after `--` is left for the task. A flag missing its value is
+// recorded in st.parseErr.
 func parseDynamicFlags(args []string, st *state) []string {
 	filtered := make([]string, 0, len(args))
-	afterDashDash := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if afterDashDash {
-			filtered = append(filtered, arg)
-			continue
-		}
 		if arg == "--" {
-			afterDashDash = true
-			filtered = append(filtered, arg)
-			continue
+			return append(filtered, args[i:]...)
 		}
-		switch arg {
+		name, value, hasValue := strings.Cut(arg, "=")
+		switch name {
 		case "--json":
 			st.json = true
+			continue
 		case "--yes", "-y":
 			st.yes = true
-		case "--mode":
-			if i+1 < len(args) {
-				st.mode = args[i+1]
-				i++
-			}
-		case "--log-file":
-			if i+1 < len(args) {
-				st.logFile = args[i+1]
-				i++
-			}
+			continue
+		case "--mode", "--log-file", "--var":
 		default:
-			if mode, ok := strings.CutPrefix(arg, "--mode="); ok {
-				st.mode = mode
-				continue
-			}
-			if logFile, ok := strings.CutPrefix(arg, "--log-file="); ok {
-				st.logFile = logFile
-				continue
-			}
 			filtered = append(filtered, arg)
+			continue
+		}
+		if !hasValue {
+			if i+1 >= len(args) || args[i+1] == "--" {
+				st.setParseErr(fmt.Errorf("%s needs a value", name))
+				continue
+			}
+			value = args[i+1]
+			i++
+		}
+		switch name {
+		case "--mode":
+			st.mode = value
+		case "--log-file":
+			st.logFile = value
+		case "--var":
+			if err := addRuntimeVar(st, value); err != nil {
+				st.setParseErr(err)
+			}
 		}
 	}
 	return filtered
+}
+
+func (st *state) setParseErr(err error) {
+	if st.parseErr == nil {
+		st.parseErr = err
+	}
 }
 
 func optsWithArgs(opts Options, args []string) Options {
@@ -179,71 +193,6 @@ func addRuntimeVar(st *state, assignment string) error {
 	return nil
 }
 
-func parseRuntimeVarArgs(args []string) ([]string, map[string]string, error) {
-	filtered := make([]string, 0, len(args))
-	vars := map[string]string{}
-	afterDashDash := false
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if afterDashDash {
-			filtered = append(filtered, arg)
-			continue
-		}
-		if arg == "--" {
-			afterDashDash = true
-			filtered = append(filtered, arg)
-			continue
-		}
-		if arg == "--var" {
-			if i+1 >= len(args) {
-				return filtered, nil, fmt.Errorf("--var expects name=value")
-			}
-			if err := addRuntimeVarTo(vars, args[i+1]); err != nil {
-				return filtered, nil, err
-			}
-			i++
-			continue
-		}
-		if value, ok := strings.CutPrefix(arg, "--var="); ok {
-			if err := addRuntimeVarTo(vars, value); err != nil {
-				return filtered, nil, err
-			}
-			continue
-		}
-		filtered = append(filtered, arg)
-	}
-	if len(vars) == 0 {
-		return filtered, nil, nil
-	}
-	return filtered, vars, nil
-}
-
-func addRuntimeVarTo(vars map[string]string, assignment string) error {
-	name, value, ok := strings.Cut(assignment, "=")
-	name = strings.TrimSpace(name)
-	if !ok || name == "" {
-		return fmt.Errorf("--var expects name=value")
-	}
-	vars[name] = value
-	return nil
-}
-
-func runOptionsWithVars(opts Options, st *state, vars map[string]string) runner.Options {
-	runOpts := runOptions(opts, st)
-	if len(vars) == 0 {
-		return runOpts
-	}
-	merged := map[string]string{}
-	for key, value := range runOpts.Vars {
-		merged[key] = value
-	}
-	for key, value := range vars {
-		merged[key] = value
-	}
-	runOpts.Vars = merged
-	return runOpts
-}
-
 func newRootCommand(opts Options, st *state) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "sd [project] [task]",
@@ -256,6 +205,9 @@ func newRootCommand(opts Options, st *state) *cobra.Command {
 		},
 	}
 	cmd.FParseErrWhitelist.UnknownFlags = true
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return runner.UsageError{Message: err.Error()}
+	})
 	cmd.PersistentFlags().BoolVar(&st.json, "json", false, "emit JSON")
 	cmd.PersistentFlags().BoolVarP(&st.yes, "yes", "y", false, "confirm dangerous tasks")
 	cmd.PersistentFlags().StringVar(&st.mode, "mode", "", "select task execution mode")
@@ -324,14 +276,6 @@ func dispatch(ws *model.Workspace, args []string, opts Options, st *state) error
 	if len(args) == 0 {
 		return listProjects(ws, opts.Stdout, st.json)
 	}
-	if aggregateArgs, vars, err := parseRuntimeVarArgs(args); len(aggregateArgs) != len(args) || len(vars) > 0 || err != nil {
-		if task, ok := resolveAggregate(ws, aggregateArgs); ok && len(task.Options) > 0 {
-			if err != nil {
-				return runner.UsageError{Message: err.Error()}
-			}
-			return runner.RunAggregate(ws, task, runOptionsWithVars(opts, st, vars))
-		}
-	}
 	if task, ok := resolveAggregate(ws, args); ok {
 		return runner.RunAggregate(ws, task, runOptions(opts, st))
 	}
@@ -383,27 +327,9 @@ func dispatch(ws *model.Workspace, args []string, opts Options, st *state) error
 			if !ok {
 				return choiceUsage(project.ID+" "+task.ID, task)
 			}
-			taskArgs := extra[1:]
-			vars := map[string]string(nil)
-			if len(choiceTask.Options) > 0 {
-				var err error
-				taskArgs, vars, err = parseRuntimeVarArgs(taskArgs)
-				if err != nil {
-					return runner.UsageError{Message: err.Error()}
-				}
-			}
-			return runner.RunProjectTask(ws, project, choiceTask, taskArgs, runOptionsWithVars(opts, st, vars))
+			return runner.RunProjectTask(ws, project, choiceTask, normalizeTaskArgs(choiceTask, extra[1:]), runOptions(opts, st))
 		}
-		taskArgs := extra
-		vars := map[string]string(nil)
-		if len(task.Options) > 0 {
-			var err error
-			taskArgs, vars, err = parseRuntimeVarArgs(taskArgs)
-			if err != nil {
-				return runner.UsageError{Message: err.Error()}
-			}
-		}
-		return runner.RunProjectTask(ws, project, task, normalizeTaskArgs(task, taskArgs), runOptionsWithVars(opts, st, vars))
+		return runner.RunProjectTask(ws, project, task, normalizeTaskArgs(task, extra), runOptions(opts, st))
 	}
 	prefix := model.JoinPath(args[1:])
 	children := model.ChildTasks(project.Tasks, prefix)
@@ -425,9 +351,13 @@ func dispatch(ws *model.Workspace, args []string, opts Options, st *state) error
 	return runner.UsageError{Message: fmt.Sprintf("unknown %s task: %s", project.ID, strings.Join(args[1:], " "))}
 }
 
+// normalizeTaskArgs drops the `--` that separates task arguments from sd's
+// own flags.
 func normalizeTaskArgs(task model.Task, args []string) []string {
-	if task.Passthrough && len(args) > 0 && args[0] == "--" {
-		return args[1:]
+	for i, arg := range args {
+		if arg == "--" {
+			return append(append([]string{}, args[:i]...), args[i+1:]...)
+		}
 	}
 	return args
 }

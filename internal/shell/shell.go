@@ -80,6 +80,13 @@ func Run(interrupts <-chan os.Signal, dir, script string, args, env []string, st
 	return interp.ExitStatus(130)
 }
 
+// ExitStatus reports the exit status of a script that failed by exiting
+// non-zero.
+func ExitStatus(err error) (int, bool) {
+	status, ok := interp.IsExitStatus(err)
+	return int(status), ok
+}
+
 // commandTracker counts the external commands that are running.
 type commandTracker struct {
 	mu      sync.Mutex

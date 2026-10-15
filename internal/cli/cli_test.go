@@ -151,8 +151,8 @@ passthrough:
 		}
 	})
 
-	t.Run("passthrough var-like args are preserved when task has no runtime inputs", func(t *testing.T) {
-		stdout, stderr, code := execute(t, root, "app", "echo", "--var", "name=value")
+	t.Run("passthrough var-like args reach the task after dashdash", func(t *testing.T) {
+		stdout, stderr, code := execute(t, root, "app", "echo", "--", "--var", "name=value")
 		if code != 0 {
 			t.Fatalf("code = %d stderr=%s", code, stderr)
 		}

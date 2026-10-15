@@ -62,7 +62,7 @@ func TestBinarySmoke(t *testing.T) {
 		{"runtime var and mode", nil, []string{"demo", "hello", "--var", "name=you", "--mode", "loud"}, "hello you!", "", 0},
 		{"whenChanged match", []string{"SD_CHANGED_FILES=projects/demo/src/main.go"}, []string{"demo", "changed"}, "changed", "", 0},
 		{"whenChanged miss", []string{"SD_CHANGED_FILES=projects/demo/README.md"}, []string{"demo", "changed"}, "sd: skipping demo:changed; no changed files match src/**\n", "", 0},
-		{"failing task", nil, []string{"demo", "fail"}, "", "exit status 3", 1},
+		{"failing task", nil, []string{"demo", "fail"}, "", "exit status 3", 3},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
