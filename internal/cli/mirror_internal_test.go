@@ -18,6 +18,7 @@ type fakeVCS struct {
 
 func (f fakeVCS) IsJJWorkcopy(dir string) (bool, error)              { return f.isWorkcopy, nil }
 func (f fakeVCS) Status(dir string) (mirror.VCSStatus, error)        { return f.status, nil }
+func (f fakeVCS) ChangedFiles(dir string) ([]string, error)          { return nil, nil }
 func (f fakeVCS) Commit(dir string, message string) error            { return nil }
 func (f fakeVCS) CurrentChange(dir string) (mirror.TraceInfo, error) { return mirror.TraceInfo{}, nil }
 

@@ -425,6 +425,19 @@ func runMirrorCommit(ctx mirrorContext, id, publicMessage string, opts Options, 
 		fmt.Fprintln(opts.Stdout, "No remote push was performed.")
 		return nil
 	}
+	// Checks may have changed the mirror after the export scan, so scan what
+	// the commit will actually record.
+	changed, err := ctx.vcs.ChangedFiles(plan.Destination)
+	if err != nil {
+		return err
+	}
+	report, err := mirror.ScanFiles(plan.Destination, changed)
+	if err != nil {
+		return err
+	}
+	if report.HasFindings() {
+		return runner.UsageError{Message: fmt.Sprintf("%s\nNo commit was created; remove these files from %s first.", report.Error(), plan.Destination)}
+	}
 	message, traceErr := ctx.commitMessage(id, publicMessage)
 	if traceErr != nil {
 		fmt.Fprintf(opts.Stderr, "warning: could not add monorepo trace trailers: %v\n", traceErr)

@@ -97,6 +97,22 @@ func fakeJJ(state, mode string, args []string) int {
 			return 42
 		}
 		fmt.Println("abc def")
+	case "diff":
+		// Report every working-copy file as changed, like a fresh mirror.
+		dir, _ := os.Getwd()
+		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() && (d.Name() == ".jj" || d.Name() == ".git") {
+				return filepath.SkipDir
+			}
+			if !d.IsDir() {
+				rel, _ := filepath.Rel(dir, path)
+				fmt.Println(rel)
+			}
+			return nil
+		})
 	case "commit":
 		appendFile(filepath.Join(state, "fake-commit-called"), strings.Join(args, " ")+"\n")
 	case "git":

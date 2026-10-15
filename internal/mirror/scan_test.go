@@ -177,3 +177,27 @@ func TestScanPlanReportsFilesItCannotScan(t *testing.T) {
 		t.Fatalf("expected unscannable file finding, got %s", text)
 	}
 }
+
+func TestScanFilesScansExistingChangesOnly(t *testing.T) {
+	root := t.TempDir()
+	dest := filepath.Join(root, "mirror")
+	write(t, filepath.Join(dest, "README.md"), "hello")
+	write(t, filepath.Join(dest, "generated", "config.ts"), `const apiKey = "Zq8vN2kLp4Rt7Yw1Xc5Bm9Hd";`)
+	write(t, filepath.Join(dest, ".jj", "repo", "store"), "TOKEN="+githubToken)
+	report, err := mirror.ScanFiles(dest, []string{"README.md", "deleted.txt", "generated/config.ts", ".jj/repo/store"})
+	if err != nil {
+		t.Fatalf("ScanFiles: %v", err)
+	}
+	if len(report.Findings) != 1 || report.Findings[0].Path != "generated/config.ts" {
+		t.Fatalf("findings = %#v", report.Findings)
+	}
+
+	symlink(t, filepath.Join(root, "outside.txt"), filepath.Join(dest, "link.txt"))
+	report, err = mirror.ScanFiles(dest, []string{"link.txt"})
+	if err != nil {
+		t.Fatalf("ScanFiles: %v", err)
+	}
+	if text := report.Error(); !strings.Contains(text, "link.txt: not a regular file") {
+		t.Fatalf("expected symlink finding, got %s", text)
+	}
+}

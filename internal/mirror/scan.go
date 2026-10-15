@@ -101,6 +101,29 @@ func ScanPlan(plan Plan) (ScanReport, error) {
 	return report, nil
 }
 
+// ScanFiles scans the files at the given slash-separated paths below root,
+// such as the changes a mirror commit would record. Paths that no longer
+// exist are deletions and are skipped; VCS directories are never scanned.
+func ScanFiles(root string, rels []string) (ScanReport, error) {
+	var report ScanReport
+	for _, rel := range rels {
+		rel = slashPath(rel)
+		if isProtected(rel) {
+			continue
+		}
+		abs := filepath.Join(root, filepath.FromSlash(rel))
+		if _, err := os.Lstat(abs); os.IsNotExist(err) {
+			continue
+		}
+		findings, err := scanFile(rel, abs)
+		if err != nil {
+			return report, err
+		}
+		report.Findings = append(report.Findings, findings...)
+	}
+	return report, nil
+}
+
 // scanFile checks the exported path rel and the content of the file at path.
 // Every file is either scanned completely or reported as a finding.
 func scanFile(rel, path string) ([]ScanFinding, error) {

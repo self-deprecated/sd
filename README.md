@@ -167,7 +167,7 @@ Mirrors export regular files only. A symlink or special file that would be expor
 
 `check` runs the built-in blacklist scanner and the mirror's configured checks without syncing. The blacklist scanner rejects obvious sensitive paths and credential-shaped content before `sync`, `commit`, or `publish` modifies the mirror. Every exported file is scanned in full, whatever its size. Credential-shaped values are only accepted when they are obvious placeholders (such as `change-me`, `sk_...`, or `xxxx`), publishable client keys (`pk_live_`, `pk_test_`, and RevenueCat `appl_`/`goog_`/`amzn_` keys), or, in test files (`*.test.*`, `*_test.go`), readable fixture values made only of lowercase words, such as `provider_token_for_tests`.
 
-`sync` updates the local mirror but does not commit. `commit` and `publish` sync and create a local jj commit in the mirror. No `sd mirror` command pushes upstream; review the mirror and push manually when ready.
+`sync` updates the local mirror but does not commit. `commit` and `publish` sync and create a local jj commit in the mirror; after the configured checks run, they scan every file the commit would add or modify and create no commit if anything is found. No `sd mirror` command pushes upstream; review the mirror and push manually when ready.
 
 The destination must be the root of its own jj workspace, outside the monorepo: a destination that is, contains, or is inside the workspace root or the mirrored Project is rejected.
 

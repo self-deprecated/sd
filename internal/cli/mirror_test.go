@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -392,5 +393,39 @@ func TestMirrorPlanRejectsDestinationOverlappingTheMonorepo(t *testing.T) {
 		if code == 0 || !strings.Contains(stderr, "overlaps") {
 			t.Errorf("mirror root %s: expected overlap error, code=%d stdout=%s stderr=%q", mirrorRoot, code, stdout, stderr)
 		}
+	}
+}
+
+func TestMirrorCommitScansDestinationContentsBeforeCommitting(t *testing.T) {
+	for _, action := range []string{"commit", "publish"} {
+		t.Run(action, func(t *testing.T) {
+			root := t.TempDir()
+			mirrorRoot := filepath.Join(t.TempDir(), "mirrors")
+			dest := filepath.Join(mirrorRoot, "demo")
+			writeMirrorFixture(t, root)
+			// A configured check generates a secrets file inside the mirror.
+			mirrors := filepath.Join(root, ".sd", "mirrors.yaml")
+			data, err := os.ReadFile(mirrors)
+			if err != nil {
+				t.Fatal(err)
+			}
+			check := fmt.Sprintf("      - \"printf 'API_TOKEN=Zq8vN2kLp4Rt7Yw1Xc5Bm9Hd' > '%s'\"\n", filepath.ToSlash(filepath.Join(dest, ".env")))
+			write(t, mirrors, strings.Replace(string(data), "      - true\n", check, 1))
+			write(t, filepath.Join(root, "projects", "demo", "README.md"), "hello")
+			write(t, filepath.Join(root, "projects", "demo", "CONTEXT.public.md"), "public")
+			write(t, filepath.Join(dest, ".jj", "repo"), "repo")
+			cli.InstallFakeJJ(t, root, "commit")
+
+			_, stderr, code := execute(t, root, "mirror", "--mirror-root", mirrorRoot, action, "demo", "-m", "feat: public snapshot")
+			if _, err := os.Stat(filepath.Join(dest, ".env")); err != nil {
+				t.Fatalf("check did not generate .env: %v (stderr %q)", err, stderr)
+			}
+			if _, err := os.Stat(filepath.Join(root, "fake-commit-called")); !os.IsNotExist(err) {
+				t.Errorf("jj commit ran although the mirror contains .env")
+			}
+			if code != 2 || !strings.Contains(stderr, "blacklist scan") || !strings.Contains(stderr, ".env: forbidden path pattern") {
+				t.Fatalf("expected blacklist usage error, code=%d stderr=%q", code, stderr)
+			}
+		})
 	}
 }

@@ -1,8 +1,10 @@
 package mirror
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -20,6 +22,9 @@ type VCS interface {
 	// IsJJWorkcopy reports whether dir is the root of a jj workspace.
 	IsJJWorkcopy(dir string) (bool, error)
 	Status(dir string) (VCSStatus, error)
+	// ChangedFiles lists the paths, relative to dir, that the working-copy
+	// change adds, modifies, or deletes.
+	ChangedFiles(dir string) ([]string, error)
 	Commit(dir string, message string) error
 	CurrentChange(dir string) (TraceInfo, error)
 }
@@ -55,6 +60,22 @@ func (JJVCS) Status(dir string) (VCSStatus, error) {
 	}
 	text := string(out)
 	return VCSStatus{Clean: strings.Contains(text, "The working copy has no changes."), Output: text}, nil
+}
+
+func (JJVCS) ChangedFiles(dir string) ([]string, error) {
+	cmd := exec.Command("jj", "diff", "--no-pager", "--name-only", "-r", "@")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("list mirror changes: %w", err)
+	}
+	var paths []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			paths = append(paths, filepath.ToSlash(line))
+		}
+	}
+	return paths, nil
 }
 
 func (JJVCS) Commit(dir string, message string) error {
