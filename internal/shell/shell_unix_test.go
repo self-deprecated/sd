@@ -14,8 +14,17 @@ import (
 // A command that ignores SIGINT must still be gone when Run returns, so an
 // interrupted task cannot leave builds or servers running.
 func TestInterruptKillsCommandsThatIgnoreIt(t *testing.T) {
-	pidFile := filepath.Join(t.TempDir(), "pid")
-	script := fmt.Sprintf(`SD_SHELL_HELPER=1 %q ignore-interrupt %q`, os.Args[0], pidFile)
+	for _, form := range []string{"%s", "%s & while true; do :; done"} {
+		t.Run(form, func(t *testing.T) {
+			pidFile := filepath.Join(t.TempDir(), "pid")
+			command := fmt.Sprintf(`SD_SHELL_HELPER=1 %q ignore-interrupt %q`, os.Args[0], pidFile)
+			assertInterruptKills(t, fmt.Sprintf(form, command), pidFile)
+		})
+	}
+}
+
+func assertInterruptKills(t *testing.T, script, pidFile string) {
+	t.Helper()
 	out := &syncBuffer{}
 	interrupts := make(chan os.Signal, 1)
 	result := runAsync(t, script, interrupts, out)

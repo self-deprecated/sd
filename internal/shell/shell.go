@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/term"
@@ -38,10 +39,9 @@ func Run(interrupts <-chan os.Signal, dir, script string, args, env []string, st
 	if err != nil {
 		return err
 	}
+	commands := newCommandTracker()
 	runner, err := interp.New(
-		interp.ExecHandlers(func(interp.ExecHandlerFunc) interp.ExecHandlerFunc {
-			return interp.DefaultExecHandler(killAfter)
-		}),
+		interp.ExecHandlers(commands.track),
 		interp.Dir(dir),
 		interp.Env(expand.ListEnviron(env...)),
 		interp.StdIO(stdin, stdout, stderr),
@@ -62,12 +62,61 @@ func Run(interrupts <-chan os.Signal, dir, script string, args, env []string, st
 	case <-interrupts:
 		stop()
 	}
+	// Background commands can outlive the interpreter, so wait for both.
+	stopped := make(chan struct{})
+	go func() {
+		<-result
+		<-commands.idle()
+		close(stopped)
+	}()
 	select {
-	case <-result:
+	case <-stopped:
 	case <-time.After(abandonAfter):
 		restoreTerminal()
 	}
 	return interp.ExitStatus(130)
+}
+
+// commandTracker counts the external commands that are running.
+type commandTracker struct {
+	mu      sync.Mutex
+	running int
+	idleCh  chan struct{} // closed while no command is running
+}
+
+func newCommandTracker() *commandTracker {
+	idle := make(chan struct{})
+	close(idle)
+	return &commandTracker{idleCh: idle}
+}
+
+// track runs commands with the default handler, which interrupts them on
+// cancellation and kills them killAfter later.
+func (c *commandTracker) track(interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+	run := interp.DefaultExecHandler(killAfter)
+	return func(ctx context.Context, args []string) error {
+		c.mu.Lock()
+		if c.running == 0 {
+			c.idleCh = make(chan struct{})
+		}
+		c.running++
+		c.mu.Unlock()
+		defer func() {
+			c.mu.Lock()
+			c.running--
+			if c.running == 0 {
+				close(c.idleCh)
+			}
+			c.mu.Unlock()
+		}()
+		return run(ctx, args)
+	}
+}
+
+func (c *commandTracker) idle() <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.idleCh
 }
 
 // saveTerminal records the state of stdin if it is a terminal and returns a
