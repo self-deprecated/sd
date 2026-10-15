@@ -699,6 +699,7 @@ func detectChangedFiles(root string) ([]string, error) {
 		if files, ok := runChangedFilesCommand(root, "git", "diff", "--name-only", base+"...HEAD"); ok {
 			return files, nil
 		}
+		return nil, UsageError{Message: fmt.Sprintf("could not resolve SD_CHANGE_BASE %q with jj or git", base)}
 	}
 	if files, ok := runChangedFilesCommand(root, "jj", "diff", "--name-only"); ok {
 		return files, nil
@@ -760,7 +761,11 @@ func globToRegexp(pattern string) *regexp.Regexp {
 	for i := 0; i < len(pattern); i++ {
 		switch pattern[i] {
 		case '*':
-			if i+1 < len(pattern) && pattern[i+1] == '*' {
+			if strings.HasPrefix(pattern[i:], "**/") {
+				// `**/` also matches no directories at all.
+				b.WriteString("(?:.*/)?")
+				i += 2
+			} else if i+1 < len(pattern) && pattern[i+1] == '*' {
 				b.WriteString(".*")
 				i++
 			} else {
