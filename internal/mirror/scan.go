@@ -15,6 +15,9 @@ import (
 type ScanFinding struct {
 	Path   string `json:"path"`
 	Reason string `json:"reason"`
+	// alwaysBlocks marks forbidden paths and unscannable files, which an
+	// allow list cannot accept.
+	alwaysBlocks bool
 }
 
 type ScanReport struct {
@@ -23,14 +26,15 @@ type ScanReport struct {
 	Allowed []ScanFinding `json:"allowed,omitempty"`
 }
 
-// allow moves findings in paths matching the allow patterns to Allowed.
+// allow moves content findings in paths matching the allow patterns to
+// Allowed.
 func (r ScanReport) allow(patterns []string) ScanReport {
 	if len(patterns) == 0 {
 		return r
 	}
 	var out ScanReport
 	for _, finding := range r.Findings {
-		if matchesAny(finding.Path, patterns) {
+		if !finding.alwaysBlocks && matchesAny(finding.Path, patterns) {
 			out.Allowed = append(out.Allowed, finding)
 		} else {
 			out.Findings = append(out.Findings, finding)
@@ -146,14 +150,14 @@ func ScanFiles(root string, rels []string, allow []string) (ScanReport, error) {
 // Every file is either scanned completely or reported as a finding.
 func scanFile(rel, path string) ([]ScanFinding, error) {
 	if matchesAny(rel, forbiddenPathPatterns) && !matchesAny(rel, allowedPathPatterns) {
-		return []ScanFinding{{Path: rel, Reason: "forbidden path pattern"}}, nil
+		return []ScanFinding{{Path: rel, Reason: "forbidden path pattern", alwaysBlocks: true}}, nil
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return []ScanFinding{{Path: rel, Reason: "not a regular file, so it cannot be scanned"}}, nil
+		return []ScanFinding{{Path: rel, Reason: "not a regular file, so it cannot be scanned", alwaysBlocks: true}}, nil
 	}
 	file, err := os.Open(path)
 	if err != nil {

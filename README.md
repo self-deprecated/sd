@@ -186,7 +186,7 @@ Mirrors export regular files only. A symlink or special file that would be expor
 
 `check` runs the built-in blacklist scanner and the mirror's configured checks without syncing. The blacklist scanner rejects obvious sensitive paths and credential-shaped content before `sync`, `commit`, or `publish` modifies the mirror. Every exported file is scanned in full, whatever its size. Credential-shaped values are only accepted when they are obvious placeholders (such as `change-me`, `sk_...`, or `xxxx`), publishable client keys (`pk_live_`, `pk_test_`, and RevenueCat `appl_`/`goog_`/`amzn_` keys), or, in test files (`*.test.*`, `*_test.go`), readable fixture values made only of lowercase words, such as `provider_token_for_tests`.
 
-After reviewing a finding that is not a real secret, such as a test fixture with a realistic-looking fake token, list its path under the mirror's `allow:` (same pattern rules as `exclude`; prefer exact file paths). Allowed findings are still printed, and reported as `allowed` in `check --json`, but no longer fail the scan:
+After reviewing a finding that is not a real secret, such as a test fixture with a realistic-looking fake token, list its path under the mirror's `allow:` (same pattern rules as `exclude`; prefer exact file paths). Allowed findings are still printed, and reported as `allowed` in `check --json`, but no longer fail the scan. Only credential-shaped content can be allowed; forbidden paths such as `.env` files and files that cannot be scanned always fail:
 
 ```yaml
 mirrors:

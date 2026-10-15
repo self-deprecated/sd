@@ -42,3 +42,29 @@ func TestMalformedAllowPatternsAreConfigErrors(t *testing.T) {
 		t.Fatal("expected a malformed allow pattern to be rejected")
 	}
 }
+
+// allow only accepts reviewed content findings; forbidden paths such as
+// .env files and files that cannot be scanned always block.
+func TestAllowNeverWaivesForbiddenPathsOrUnscannableFiles(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "project")
+	write(t, filepath.Join(source, "test", ".env"), "TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n")
+	write(t, filepath.Join(source, "test", "id_rsa"), "key\n")
+	plan, err := mirror.BuildPlan("app", source, config.MirrorConfig{Source: source, Allow: []string{"test/**"}}, filepath.Join(t.TempDir(), "mirror"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := mirror.ScanPlan(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Findings) != 2 || len(report.Allowed) != 0 {
+		t.Fatalf("report = %+v, want both forbidden paths to block", report)
+	}
+
+	destination := t.TempDir()
+	write(t, filepath.Join(destination, "test", ".env"), "TOKEN=x\n")
+	report, err = mirror.ScanFiles(destination, []string{"test/.env"}, []string{"test/**"})
+	if err != nil || len(report.Findings) != 1 {
+		t.Fatalf("ScanFiles report = %+v err = %v, want the .env to block", report, err)
+	}
+}
