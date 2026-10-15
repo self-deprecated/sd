@@ -4,9 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/self-deprecated/sd/internal/model"
 )
@@ -93,7 +94,7 @@ func TestPickerViewListsModesAboveOptions(t *testing.T) {
 	}}}, Aliases: map[string]string{"app": "app"}}
 	m := newPickerModel(ws, []string{"app", "release"})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
-	view := updated.(pickerModel).View()
+	view := updated.(pickerModel).render()
 	for _, want := range []string{"app › release", "Modes(Tab):", "dry-run", "publish", "release npm"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q: %q", want, view)
@@ -110,7 +111,7 @@ func TestPickerViewStaysWithinWindowHeightWhenPreviewIsVisible(t *testing.T) {
 	m := pickerModel{choices: choices, list: list.New(items, list.NewDefaultDelegate(), 0, 0)}
 	m.list.Title = "SD tasks"
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
-	view := updated.(pickerModel).View()
+	view := updated.(pickerModel).render()
 	if got := lipgloss.Height(view); got > 20 {
 		t.Fatalf("view height = %d, want <= 20\n%s", got, view)
 	}
@@ -133,7 +134,7 @@ func TestPickerViewStaysWithinWindowHeightWhenPreviewIsMultiline(t *testing.T) {
 	m := pickerModel{choices: choices, list: list.New(items, list.NewDefaultDelegate(), 0, 0)}
 	m.list.Title = "SD tasks"
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 18})
-	view := updated.(pickerModel).View()
+	view := updated.(pickerModel).render()
 	if got := lipgloss.Height(view); got > 18 {
 		t.Fatalf("view height = %d, want <= 18\n%s", got, view)
 	}
@@ -185,7 +186,7 @@ func variableTexts(parts []PreviewPart) []string {
 func sendKeys(m tea.Model, text string) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	for _, r := range text {
-		m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m, cmd = m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 	return m, cmd
 }
@@ -209,7 +210,7 @@ func TestPickerFilterPrefersTaskTitleBeforeDescriptionAndShowsTypedText(t *testi
 	if got := selectedTitle(filtered); got != "landing deploy" {
 		t.Fatalf("selected item after typing dep = %q, want landing deploy", got)
 	}
-	if view := filtered.View(); !strings.Contains(view, "Filter: dep") {
+	if view := ansi.Strip(filtered.render()); !strings.Contains(view, "Filter: dep") {
 		t.Fatalf("view does not show typed filter: %q", view)
 	}
 }
@@ -230,7 +231,7 @@ func TestPickerTypingNarrowsEnterNavigatesThenRunsLeaf(t *testing.T) {
 	if got := selectedTitle(filteredRoot); got != "landing" {
 		t.Fatalf("selected root item after typing land = %q", got)
 	}
-	updated, _ = filteredRoot.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = filteredRoot.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	landingStage := updated.(pickerModel)
 	if got := strings.Join(landingStage.prefix, "/"); got != "landing" {
 		t.Fatalf("prefix after enter = %q", got)
@@ -244,7 +245,7 @@ func TestPickerTypingNarrowsEnterNavigatesThenRunsLeaf(t *testing.T) {
 	if got := selectedTitle(filteredLanding); got != "landing preview" {
 		t.Fatalf("selected landing item after typing prev = %q", got)
 	}
-	updated, _ = filteredLanding.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = filteredLanding.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	picked := updated.(pickerModel)
 	if !picked.selected {
 		t.Fatalf("expected final selection")
@@ -265,12 +266,12 @@ func TestPickerCanNavigateBackToPreviousScreen(t *testing.T) {
 		},
 	}}}, Aliases: map[string]string{"app": "app"}}
 	m := newPickerModel(ws, []string{"app", "mobile"})
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	navigated := updated.(pickerModel)
 	if got := strings.Join(navigated.prefix, "/"); got != "app/mobile/build" {
 		t.Fatalf("prefix after enter = %q", got)
 	}
-	updated, _ = navigated.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	updated, _ = navigated.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	back := updated.(pickerModel)
 	if got := strings.Join(back.prefix, "/"); got != "app/mobile" {
 		t.Fatalf("prefix after back = %q", got)

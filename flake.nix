@@ -15,7 +15,7 @@
           pname = "sd";
           inherit version;
           src = ./.;
-          vendorHash = "sha256-TzFBc/YDzkOZ71c7ECpDMPWOHpAaraVi7l9wtZ7e/eU=";
+          vendorHash = "sha256-E2zrt48zzicqy0Kmhxkpdu5pscMdTlp2iBiyczhC1XA=";
 
           subPackages = [ "cmd/sd" ];
 

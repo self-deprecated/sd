@@ -2,13 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"io"
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/self-deprecated/sd/internal/model"
 )
@@ -118,13 +119,9 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.updateTitle()
 		m.resizeList()
-	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyRunes:
-			m.applyFilter(m.filter + string(msg.Runes))
-			return m, nil
-		case tea.KeySpace:
-			m.applyFilter(m.filter + " ")
+	case tea.KeyPressMsg:
+		if msg.Text != "" && msg.Mod&(tea.ModCtrl|tea.ModAlt) == 0 {
+			m.applyFilter(m.filter + msg.Text)
 			return m, nil
 		}
 		switch msg.String() {
@@ -355,7 +352,11 @@ func (m pickerModel) modeLine() string {
 	return "Modes(Tab): " + strings.Join(parts, " | ")
 }
 
-func (m pickerModel) View() string {
+func (m pickerModel) View() tea.View {
+	return tea.NewView(m.render())
+}
+
+func (m pickerModel) render() string {
 	body := m.list.View()
 	if modeLine := m.modeLine(); modeLine != "" {
 		body = insertAfterFirstLine(body, modeLine)
@@ -495,7 +496,7 @@ func renderPreviewParts(parts []PreviewPart) string {
 		}
 	}
 	sort.Strings(keys)
-	palette := []lipgloss.Color{"13", "14", "11", "12", "9", "10"}
+	palette := []color.Color{lipgloss.Color("13"), lipgloss.Color("14"), lipgloss.Color("11"), lipgloss.Color("12"), lipgloss.Color("9"), lipgloss.Color("10")}
 	styles := map[string]lipgloss.Style{}
 	for i, key := range keys {
 		styles[key] = lipgloss.NewStyle().Foreground(palette[i%len(palette)]).Bold(true)
