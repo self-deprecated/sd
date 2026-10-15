@@ -197,6 +197,11 @@ func (t Task) ChoiceTask(choiceID string) (Task, bool) {
 	}
 	if len(choice.Depends) > 0 {
 		resolved.Depends = append([]string{}, choice.Depends...)
+		// A choice that only lists dependencies groups other choices; it
+		// must not also run the task's own command.
+		if choice.Run == "" {
+			resolved.Run = ""
+		}
 	}
 	resolved.Scripts = appendUnique(t.Scripts, choice.Scripts...)
 	return resolved, true

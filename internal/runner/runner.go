@@ -28,12 +28,47 @@ type Options struct {
 	AllowPrompt bool
 	Mode        string
 	Vars        map[string]string
+
+	// inheritedMode is the effective mode of the task that depends on this
+	// one; stack holds the dependency chain being run.
+	inheritedMode string
+	stack         []string
+}
+
+// enter adds label to the dependency chain, rejecting cycles.
+func enter(label string, opts Options) (Options, error) {
+	for i, running := range opts.stack {
+		if running == label {
+			cycle := append(append([]string{}, opts.stack[i:]...), label)
+			return opts, UsageError{Message: "dependency cycle: " + strings.Join(cycle, " → ")}
+		}
+	}
+	opts.stack = append(append([]string{}, opts.stack...), label)
+	return opts, nil
+}
+
+// dependencyOptions returns the options for running task's dependencies:
+// they inherit its effective mode but not its runtime variables.
+func dependencyOptions(task model.Task, opts Options) Options {
+	deps := opts
+	deps.Vars = nil
+	deps.Mode = ""
+	if task.Mode != "" {
+		deps.inheritedMode = task.Mode
+	}
+	return deps
 }
 
 func RunProjectTask(ws *model.Workspace, project *model.Project, task model.Task, args []string, opts Options) error {
 	label := fmt.Sprintf("%s:%s", project.ID, task.ID)
-	var err error
-	task, err = resolveMode(label, task, opts.Mode)
+	if task.Choice != "" {
+		label += " " + task.Choice
+	}
+	opts, err := enter(label, opts)
+	if err != nil {
+		return err
+	}
+	task, err = resolveMode(label, task, opts)
 	if err != nil {
 		return err
 	}
@@ -56,17 +91,15 @@ func RunProjectTask(ws *model.Workspace, project *model.Project, task model.Task
 	if len(missing) > 0 {
 		return UsageError{Message: fmt.Sprintf("task %s:%s missing required environment: %s", project.ID, task.ID, strings.Join(missing, ", "))}
 	}
-	if len(task.Depends) > 0 {
-		depOpts := opts
-		depOpts.Vars = nil
-		for _, dep := range task.Depends {
-			if err := RunReference(ws, dep, nil, depOpts); err != nil {
-				return err
-			}
+	for _, dep := range task.Depends {
+		if err := RunReference(ws, dep, nil, dependencyOptions(task, opts)); err != nil {
+			return err
 		}
-		return nil
 	}
 	if strings.TrimSpace(task.Run) == "" {
+		if len(task.Depends) > 0 {
+			return nil
+		}
 		return UsageError{Message: fmt.Sprintf("task %s:%s has no run command", project.ID, task.ID)}
 	}
 	command, err := composeSharedScripts(project, task)
@@ -77,8 +110,11 @@ func RunProjectTask(ws *model.Workspace, project *model.Project, task model.Task
 }
 
 func RunAggregate(ws *model.Workspace, task model.Task, opts Options) error {
-	var err error
-	task, err = resolveMode(task.ID, task, opts.Mode)
+	opts, err := enter(task.ID, opts)
+	if err != nil {
+		return err
+	}
+	task, err = resolveMode(task.ID, task, opts)
 	if err != nil {
 		return err
 	}
@@ -100,10 +136,8 @@ func RunAggregate(ws *model.Workspace, task model.Task, opts Options) error {
 	if len(missing) > 0 {
 		return UsageError{Message: fmt.Sprintf("task %s missing required environment: %s", task.ID, strings.Join(missing, ", "))}
 	}
-	depOpts := opts
-	depOpts.Vars = nil
 	for _, dep := range task.Depends {
-		if err := RunReference(ws, dep, nil, depOpts); err != nil {
+		if err := RunReference(ws, dep, nil, dependencyOptions(task, opts)); err != nil {
 			return err
 		}
 	}
@@ -155,7 +189,13 @@ func resolveProjectReference(project *model.Project, ref string) (model.Task, bo
 	return model.Task{}, false
 }
 
-func resolveMode(label string, task model.Task, mode string) (model.Task, error) {
+// resolveMode applies the requested mode, or for a dependency with modes the
+// mode inherited from the task that depends on it.
+func resolveMode(label string, task model.Task, opts Options) (model.Task, error) {
+	mode := opts.Mode
+	if mode == "" && len(task.Modes) > 0 {
+		mode = opts.inheritedMode
+	}
 	resolved, ok := task.ApplyMode(mode)
 	if ok {
 		return resolved, nil
