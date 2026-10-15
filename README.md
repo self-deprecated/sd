@@ -18,11 +18,12 @@ Or with Nix: see [Nix](#nix).
 
 ## How tasks run
 
-`run` commands, shared scripts, and mirror `checks` are executed by an embedded bash-compatible interpreter ([mvdan.cc/sh](https://github.com/mvdan/sh)), so the same manifest behaves the same on Linux, macOS, and Windows and no `bash` binary is required. Bash syntax such as functions, arrays, `[[ ]]`, `(( ))`, `set -euo pipefail`, process substitution, and `trap` works.
+`run` commands, shared scripts, and mirror `checks` are executed by an embedded bash-compatible interpreter ([mvdan.cc/sh](https://github.com/mvdan/sh)), so no `bash` binary is required and a manifest behaves the same on Linux, macOS, and Windows as long as the programs it calls exist there. Common bash syntax works: functions, arrays, `[[ ]]`, `(( ))`, `set -euo pipefail`, here-strings, and `$( )`.
 
 - Tasks inherit the environment `sd` was started with. There is no login shell, so `~/.bash_profile` and similar files are not sourced; run `sd` from the environment your tasks need (for example a devenv or `nix develop` shell).
-- Ctrl-C stops the task and still runs its `EXIT` trap; the task then exits with status 130.
-- External programs are looked up on `PATH` (with `PATHEXT` on Windows). On Windows, tools such as `cat`, `rm`, or `grep` must be installed and on `PATH`, and a script with a shebang cannot be executed directly: call its interpreter explicitly, for example `bash ./scripts/build.sh`.
+- `trap` supports `EXIT` and `ERR` only. Ctrl-C stops the task and runs its `EXIT` trap once; a second Ctrl-C stops the trap. The task then exits with status 130.
+- External programs are looked up on `PATH` (with `PATHEXT` on Windows, so shims such as `npm.cmd` work).
+- On Windows, process substitution (`<( )`) is not supported, tools such as `cat`, `rm`, or `grep` must be installed and on `PATH`, and a script with a shebang cannot be executed directly: call its interpreter explicitly, for example `bash ./scripts/build.sh`.
 
 ## Common commands
 
