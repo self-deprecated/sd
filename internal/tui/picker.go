@@ -579,7 +579,7 @@ func choiceForTask(title string, task model.Task, args []string, mode string) Ch
 	if ok {
 		task = resolved
 	}
-	values := model.ResolveOptionValues(task.Options, task.Values)
+	values, _ := model.ResolveOptionValues(task.Options, task.Values)
 	task = model.RenderTask(task, values)
 	preview, previewParts := buildPreviewParts(task.Run, nil, task.Env)
 	return Choice{Title: title, Description: task.Desc, Args: args, Preview: preview, PreviewParts: previewParts, Danger: task.Danger, Mode: task.Mode}

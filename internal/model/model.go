@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -281,31 +282,57 @@ func ResolveChoiceValues(t Task, choice TaskChoice) map[string]string {
 	return values
 }
 
-func ResolveOptionValues(options map[string]TaskOption, overlays ...map[string]string) map[string]string {
+// ResolveOptionValues resolves template values. Option defaults come first,
+// then variables derived from each option's selected value, then the
+// overlays (choice and mode values, explicit --var values) in order, so an
+// explicit value always wins. Two selected values deriving different values
+// for the same variable is an error.
+func ResolveOptionValues(options map[string]TaskOption, overlays ...map[string]string) (map[string]string, error) {
+	explicit := map[string]string{}
+	for _, overlay := range overlays {
+		for key, value := range overlay {
+			explicit[key] = value
+		}
+	}
 	values := map[string]string{}
 	for name, option := range options {
 		if option.Default != "" {
 			values[name] = option.Default
 		}
 	}
-	for _, overlay := range overlays {
-		for key, value := range overlay {
-			values[key] = value
+	for key, value := range explicit {
+		values[key] = value
+	}
+	names := make([]string, 0, len(options))
+	for name := range options {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	derived := map[string]string{}
+	derivedFrom := map[string]string{}
+	for _, name := range names {
+		selected, ok := options[name].Values[values[name]]
+		if !ok {
+			continue
+		}
+		for key, value := range selected.Vars {
+			if _, ok := explicit[key]; ok {
+				continue
+			}
+			if previous, ok := derived[key]; ok && previous != value {
+				return nil, fmt.Errorf("options %s and %s set %q to different values", derivedFrom[key], name, key)
+			}
+			derived[key] = value
+			derivedFrom[key] = name
 		}
 	}
-	for optionName, selected := range values {
-		if option, ok := options[optionName]; ok {
-			if optionValue, ok := option.Values[selected]; ok {
-				for key, value := range optionValue.Vars {
-					values[key] = value
-				}
-			}
-		}
+	for key, value := range derived {
+		values[key] = value
 	}
 	if len(values) == 0 {
-		return nil
+		return nil, nil
 	}
-	return values
+	return values, nil
 }
 
 func RenderTask(t Task, values map[string]string) Task {

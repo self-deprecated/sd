@@ -211,7 +211,10 @@ func resolveRuntimeInputs(label string, task model.Task, opts Options) (model.Ta
 	if err := validateRuntimeOverrides(label, task, opts.Vars); err != nil {
 		return model.Task{}, err
 	}
-	values := model.ResolveOptionValues(task.Options, task.Values, opts.Vars)
+	values, err := model.ResolveOptionValues(task.Options, task.Values, opts.Vars)
+	if err != nil {
+		return model.Task{}, UsageError{Message: fmt.Sprintf("task %s: %s", label, err)}
+	}
 	if err := validateRuntimeValues(label, task, values); err != nil {
 		return model.Task{}, err
 	}
@@ -318,7 +321,9 @@ func promptRuntimeInputs(label string, task model.Task, values map[string]string
 				continue
 			}
 			prompted[name] = answer
-			prompted = model.ResolveOptionValues(task.Options, prompted)
+			if prompted, err = model.ResolveOptionValues(task.Options, prompted); err != nil {
+				return nil, UsageError{Message: fmt.Sprintf("task %s: %s", label, err)}
+			}
 			break
 		}
 	}
