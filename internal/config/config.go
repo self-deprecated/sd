@@ -1,6 +1,9 @@
 package config
 
 import (
+	"errors"
+	"fmt"
+	"io"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -65,38 +68,57 @@ type MirrorLocalFile struct {
 
 func ReadWorkspace(path string) (WorkspaceFile, error) {
 	var out WorkspaceFile
-	err := readYAML(path, &out)
+	err := readYAML(path, &out, &out.Version)
 	return out, err
 }
 
 func ReadTaskFile(path string) (TaskFile, error) {
 	var out TaskFile
-	err := readYAML(path, &out)
+	err := readYAML(path, &out, &out.Version)
 	return out, err
 }
 
 func ReadAggregates(path string) (AggregatesFile, error) {
 	var out AggregatesFile
-	err := readYAML(path, &out)
+	err := readYAML(path, &out, &out.Version)
 	return out, err
 }
 
 func ReadMirrors(path string) (MirrorsFile, error) {
 	var out MirrorsFile
-	err := readYAML(path, &out)
+	err := readYAML(path, &out, nil)
 	return out, err
 }
 
 func ReadMirrorLocal(path string) (MirrorLocalFile, error) {
 	var out MirrorLocalFile
-	err := readYAML(path, &out)
+	err := readYAML(path, &out, nil)
 	return out, err
 }
 
-func readYAML(path string, out any) error {
-	data, err := os.ReadFile(path)
+// readYAML decodes path into out, rejecting unknown fields so typos such as
+// `dangerous: true` fail loudly, and requires `version: 1` unless version is
+// nil because the caller checks it.
+func readYAML(path string, out any, version *int) error {
+	file, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	return yaml.Unmarshal(data, out)
+	defer file.Close()
+	decoder := yaml.NewDecoder(file)
+	decoder.KnownFields(true)
+	if err := decoder.Decode(out); err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if version == nil {
+		return nil
+	}
+	switch *version {
+	case 1:
+		return nil
+	case 0:
+		return fmt.Errorf("%s: missing `version: 1`", path)
+	default:
+		return fmt.Errorf("%s: unsupported version %d (sd supports version 1)", path, *version)
+	}
 }

@@ -105,7 +105,9 @@ func loadMonorepo(root string) (*model.Workspace, error) {
 			ws.Aggregates[id] = task
 		}
 	}
-	indexAliases(ws)
+	if err := indexAliases(ws); err != nil {
+		return nil, err
+	}
 	return ws, nil
 }
 
@@ -122,14 +124,16 @@ func loadStandalone(root string) (*model.Workspace, error) {
 		Aggregates: map[string]model.Task{},
 		Aliases:    map[string]string{},
 	}
-	indexAliases(ws)
+	if err := indexAliases(ws); err != nil {
+		return nil, err
+	}
 	return ws, nil
 }
 
 func loadProject(path string) (*model.Project, error) {
 	tf, err := config.ReadTaskFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, err
 	}
 	base := filepath.Dir(filepath.Dir(path))
 	project := tf.Project
@@ -164,6 +168,9 @@ func loadProject(path string) (*model.Project, error) {
 		project.Tasks[id] = task
 	}
 	for id, task := range tf.Passthrough {
+		if _, ok := project.Tasks[id]; ok {
+			return nil, fmt.Errorf("%s: %q is both a task and a passthrough", path, id)
+		}
 		if err := validateTaskScripts(project.ID+":"+id, task, project.Scripts); err != nil {
 			return nil, err
 		}
@@ -205,16 +212,27 @@ func validateTaskScripts(label string, task model.Task, scripts map[string]model
 	return nil
 }
 
-func indexAliases(ws *model.Workspace) {
+// indexAliases maps every project id and alias to its project, rejecting
+// duplicate ids and aliases that would redirect another project's name.
+func indexAliases(ws *model.Workspace) error {
 	if ws.Aliases == nil {
 		ws.Aliases = map[string]string{}
 	}
 	for _, project := range ws.Projects {
+		if _, ok := ws.Aliases[project.ID]; ok {
+			return fmt.Errorf("duplicate project id %q", project.ID)
+		}
 		ws.Aliases[project.ID] = project.ID
+	}
+	for _, project := range ws.Projects {
 		for _, alias := range project.Aliases {
+			if owner, ok := ws.Aliases[alias]; ok && owner != project.ID {
+				return fmt.Errorf("project %s alias %q is already used by project %s", project.ID, alias, owner)
+			}
 			ws.Aliases[alias] = project.ID
 		}
 	}
+	return nil
 }
 
 func existingAncestor(path string) string {
