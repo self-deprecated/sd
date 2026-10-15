@@ -19,6 +19,24 @@ type ScanFinding struct {
 
 type ScanReport struct {
 	Findings []ScanFinding `json:"findings,omitempty"`
+	// Allowed are findings in paths the mirror's allow list accepts.
+	Allowed []ScanFinding `json:"allowed,omitempty"`
+}
+
+// allow moves findings in paths matching the allow patterns to Allowed.
+func (r ScanReport) allow(patterns []string) ScanReport {
+	if len(patterns) == 0 {
+		return r
+	}
+	var out ScanReport
+	for _, finding := range r.Findings {
+		if matchesAny(finding.Path, patterns) {
+			out.Allowed = append(out.Allowed, finding)
+		} else {
+			out.Findings = append(out.Findings, finding)
+		}
+	}
+	return out
 }
 
 func (r ScanReport) HasFindings() bool { return len(r.Findings) > 0 }
@@ -98,13 +116,13 @@ func ScanPlan(plan Plan) (ScanReport, error) {
 		}
 		report.Findings = append(report.Findings, findings...)
 	}
-	return report, nil
+	return report.allow(plan.Allow), nil
 }
 
 // ScanFiles scans the files at the given slash-separated paths below root,
 // such as the changes a mirror commit would record. Paths that no longer
 // exist are deletions and are skipped; VCS directories are never scanned.
-func ScanFiles(root string, rels []string) (ScanReport, error) {
+func ScanFiles(root string, rels []string, allow []string) (ScanReport, error) {
 	var report ScanReport
 	for _, rel := range rels {
 		rel = slashPath(rel)
@@ -121,7 +139,7 @@ func ScanFiles(root string, rels []string) (ScanReport, error) {
 		}
 		report.Findings = append(report.Findings, findings...)
 	}
-	return report, nil
+	return report.allow(allow), nil
 }
 
 // scanFile checks the exported path rel and the content of the file at path.

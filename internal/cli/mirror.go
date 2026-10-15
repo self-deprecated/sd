@@ -402,6 +402,7 @@ type mirrorCheckResult struct {
 	Passed        bool                 `json:"passed"`
 	ExportedFiles int                  `json:"exportedFiles"`
 	Findings      []mirror.ScanFinding `json:"findings"`
+	Allowed       []mirror.ScanFinding `json:"allowed"`
 }
 
 func runMirrorCheck(ctx mirrorContext, id string, opts Options, st *state) error {
@@ -433,7 +434,7 @@ func runMirrorCheckJSON(plan mirror.Plan, opts Options) error {
 	if err != nil {
 		return err
 	}
-	result := mirrorCheckResult{Version: 1, Mirror: plan.MirrorID, ExportedFiles: len(plan.Files), Findings: append([]mirror.ScanFinding{}, report.Findings...)}
+	result := mirrorCheckResult{Version: 1, Mirror: plan.MirrorID, ExportedFiles: len(plan.Files), Findings: append([]mirror.ScanFinding{}, report.Findings...), Allowed: append([]mirror.ScanFinding{}, report.Allowed...)}
 	var checkErr error
 	if !report.HasFindings() {
 		checkOpts := opts
@@ -483,7 +484,7 @@ func runMirrorCommit(ctx mirrorContext, id, publicMessage string, opts Options, 
 	if err != nil {
 		return err
 	}
-	report, err := mirror.ScanFiles(plan.Destination, changed)
+	report, err := mirror.ScanFiles(plan.Destination, changed, plan.Allow)
 	if err != nil {
 		return err
 	}
@@ -628,6 +629,9 @@ func scanMirrorPlan(plan mirror.Plan, opts Options) error {
 		return runner.UsageError{Message: report.Error()}
 	}
 	fmt.Fprintf(opts.Stdout, "mirror %s blacklist scan passed (%d exported files)\n", plan.MirrorID, len(plan.Files))
+	for _, finding := range report.Allowed {
+		fmt.Fprintf(opts.Stdout, "  allowed by config: %s: %s\n", finding.Path, finding.Reason)
+	}
 	return nil
 }
 

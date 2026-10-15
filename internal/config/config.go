@@ -49,6 +49,9 @@ type MirrorConfig struct {
 	Preserve    []string          `yaml:"preserve,omitempty" json:"preserve,omitempty"`
 	Overlays    []MirrorOverlay   `yaml:"overlays,omitempty" json:"overlays,omitempty"`
 	Checks      []string          `yaml:"checks,omitempty" json:"checks,omitempty"`
+	// Allow lists paths whose scanner findings were reviewed and accepted,
+	// such as test fixtures with fake credentials.
+	Allow []string `yaml:"allow,omitempty" json:"allow,omitempty"`
 }
 
 type MirrorDestination struct {

@@ -184,7 +184,7 @@ func TestScanFilesScansExistingChangesOnly(t *testing.T) {
 	write(t, filepath.Join(dest, "README.md"), "hello")
 	write(t, filepath.Join(dest, "generated", "config.ts"), `const apiKey = "Zq8vN2kLp4Rt7Yw1Xc5Bm9Hd";`)
 	write(t, filepath.Join(dest, ".jj", "repo", "store"), "TOKEN="+githubToken)
-	report, err := mirror.ScanFiles(dest, []string{"README.md", "deleted.txt", "generated/config.ts", ".jj/repo/store"})
+	report, err := mirror.ScanFiles(dest, []string{"README.md", "deleted.txt", "generated/config.ts", ".jj/repo/store"}, nil)
 	if err != nil {
 		t.Fatalf("ScanFiles: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestScanFilesScansExistingChangesOnly(t *testing.T) {
 	}
 
 	symlink(t, filepath.Join(root, "outside.txt"), filepath.Join(dest, "link.txt"))
-	report, err = mirror.ScanFiles(dest, []string{"link.txt"})
+	report, err = mirror.ScanFiles(dest, []string{"link.txt"}, nil)
 	if err != nil {
 		t.Fatalf("ScanFiles: %v", err)
 	}

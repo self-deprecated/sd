@@ -33,6 +33,7 @@ type mirrorCheckJSON struct {
 	Mirror        string `json:"mirror"`
 	Passed        bool   `json:"passed"`
 	ExportedFiles int    `json:"exportedFiles"`
+	Allowed       []any  `json:"allowed"`
 	Findings      []struct {
 		Path   string `json:"path"`
 		Reason string `json:"reason"`
@@ -46,7 +47,7 @@ func TestMirrorCheckJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("stdout is not JSON: %q (stderr %q)", stdout, stderr)
 	}
-	if code != 0 || got.Version != 1 || got.Mirror != "demo" || !got.Passed || got.ExportedFiles == 0 || got.Findings == nil {
+	if code != 0 || got.Version != 1 || got.Mirror != "demo" || !got.Passed || got.ExportedFiles == 0 || got.Findings == nil || got.Allowed == nil {
 		t.Fatalf("code = %d got = %+v", code, got)
 	}
 	if !strings.Contains(stderr, "noisy") {

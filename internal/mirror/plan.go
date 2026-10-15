@@ -40,6 +40,7 @@ type Plan struct {
 	Deletes       []FileOp    `json:"deletes,omitempty"`
 	Overlays      []OverlayOp `json:"overlays,omitempty"`
 	Checks        []string    `json:"checks,omitempty"`
+	Allow         []string    `json:"allow,omitempty"`
 }
 
 var alwaysProtected = []string{
@@ -66,7 +67,7 @@ func BuildPlan(mirrorID string, root string, cfg config.MirrorConfig, destinatio
 	for _, field := range []struct {
 		name     string
 		patterns []string
-	}{{"include", include}, {"exclude", cfg.Exclude}, {"preserve", cfg.Preserve}} {
+	}{{"include", include}, {"exclude", cfg.Exclude}, {"preserve", cfg.Preserve}, {"allow", cfg.Allow}} {
 		if err := validatePatterns(mirrorID, field.name, field.patterns); err != nil {
 			return Plan{}, err
 		}
@@ -95,7 +96,7 @@ func BuildPlan(mirrorID string, root string, cfg config.MirrorConfig, destinatio
 	if err != nil {
 		return Plan{}, fmt.Errorf("mirror %s: %w", mirrorID, err)
 	}
-	plan := Plan{MirrorID: mirrorID, WorkspaceRoot: root, Source: source, Destination: destination, Include: include, Exclude: exclude, Preserve: preserve, Checks: cfg.Checks}
+	plan := Plan{MirrorID: mirrorID, WorkspaceRoot: root, Source: source, Destination: destination, Include: include, Exclude: exclude, Preserve: preserve, Checks: cfg.Checks, Allow: cfg.Allow}
 	plan.Overlays = overlays
 	for rel, srcPath := range exportFiles {
 		plan.Files = append(plan.Files, FileOp{Path: rel})
