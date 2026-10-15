@@ -1,0 +1,56 @@
+version: 1
+
+project:
+  id: demo
+  name: Demo
+
+scripts:
+  context:
+    run: export GREETING=hello
+
+tasks:
+  greet:
+    desc: Greet using a shared script, an env file, and a variable
+    scripts: [context]
+    envFiles: ["env/{{target}}.env"]
+    run: printf '%s %s from %s%s' "$GREETING" "{{name}}" "$FROM_FILE" "{{suffix}}"
+    defaultMode: normal
+    modes:
+      normal:
+        values: {suffix: ""}
+      loud:
+        values: {suffix: "!"}
+    options:
+      target:
+        type: enum
+        default: dev
+        values:
+          dev: {label: Development}
+          prod: {label: Production}
+      name:
+        type: string
+    choices:
+      world:
+        values: {name: world}
+
+  hello:
+    desc: Greet a name given at runtime
+    run: printf 'hello %s{{suffix}}' "{{name}}"
+    defaultMode: normal
+    modes:
+      normal:
+        values: {suffix: ""}
+      loud:
+        values: {suffix: "!"}
+    options:
+      name:
+        type: string
+
+  changed:
+    desc: Only runs when sources change
+    whenChanged: [src/**]
+    run: printf changed
+
+  fail:
+    desc: Exit with status 3
+    run: exit 3

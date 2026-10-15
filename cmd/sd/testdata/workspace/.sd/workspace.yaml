@@ -1,0 +1,8 @@
+version: 1
+
+workspace:
+  id: smoke
+  name: Smoke workspace
+
+discover:
+  - projects/*/.sd/tasks.yaml
