@@ -37,34 +37,25 @@ func (r ScanReport) Error() string {
 	return b.String()
 }
 
+// Path patterns match at any depth; see internal/glob.
 var allowedPathPatterns = []string{
 	".env.example",
-	"**/.env.example",
 	".env.sample",
-	"**/.env.sample",
 }
 
 var forbiddenPathPatterns = []string{
 	".env",
 	".env.*",
-	"**/.env",
-	"**/.env.*",
 	"*.env",
-	"**/*.env",
 	"*.pem",
 	"*.key",
 	"*.p12",
 	"*.pfx",
 	"id_rsa",
 	"id_ed25519",
-	"**/id_rsa",
-	"**/id_ed25519",
 	"secrets.nix",
-	"**/secrets.nix",
 	"secrets/**",
-	"**/secrets/**",
 	".mcp.json",
-	"**/.mcp.json",
 }
 
 var forbiddenContentPatterns = []struct {

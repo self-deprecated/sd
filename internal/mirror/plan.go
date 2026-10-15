@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/self-deprecated/sd/internal/config"
+	"github.com/self-deprecated/sd/internal/glob"
 )
 
 type FileOp struct {
@@ -56,6 +56,14 @@ func BuildPlan(mirrorID string, root string, cfg config.MirrorConfig, destinatio
 	include := cfg.Include
 	if len(include) == 0 {
 		include = []string{"**"}
+	}
+	for _, field := range []struct {
+		name     string
+		patterns []string
+	}{{"include", include}, {"exclude", cfg.Exclude}, {"preserve", cfg.Preserve}} {
+		if err := validatePatterns(mirrorID, field.name, field.patterns); err != nil {
+			return Plan{}, err
+		}
 	}
 	exclude := append([]string{}, cfg.Exclude...)
 	exclude = append(exclude, alwaysProtected...)
@@ -205,42 +213,23 @@ func isProtected(rel string) bool {
 	return rel == ".git" || strings.HasPrefix(rel, ".git/") || rel == ".jj" || strings.HasPrefix(rel, ".jj/")
 }
 
+// matchesAny reports whether rel matches any pattern. Patterns are validated
+// by validatePatterns before use, so malformed patterns never match.
 func matchesAny(rel string, patterns []string) bool {
+	rel = strings.Trim(slashPath(rel), "/")
 	for _, pattern := range patterns {
-		if matchPattern(rel, pattern) {
+		if ok, _ := glob.Match(pattern, rel); ok {
 			return true
 		}
 	}
 	return false
 }
 
-func matchPattern(rel, pattern string) bool {
-	rel = strings.Trim(slashPath(rel), "/")
-	pattern = strings.Trim(slashPath(pattern), "/")
-	if pattern == "" {
-		return false
-	}
-	if pattern == "**" {
-		return true
-	}
-	if strings.HasSuffix(pattern, "/**") {
-		prefix := strings.TrimSuffix(pattern, "/**")
-		return rel == prefix || strings.HasPrefix(rel, prefix+"/") || strings.HasSuffix(rel, "/"+prefix) || strings.Contains(rel, "/"+prefix+"/")
-	}
-	if strings.HasPrefix(pattern, "**/") {
-		tail := strings.TrimPrefix(pattern, "**/")
-		if ok, _ := path.Match(tail, path.Base(rel)); ok {
-			return true
+func validatePatterns(mirrorID, field string, patterns []string) error {
+	for _, pattern := range patterns {
+		if err := glob.Validate(pattern); err != nil {
+			return fmt.Errorf("mirror %s %s: %w", mirrorID, field, err)
 		}
-		return strings.HasSuffix(rel, "/"+tail)
 	}
-	if strings.Contains(pattern, "/") {
-		ok, _ := path.Match(pattern, rel)
-		return ok
-	}
-	if ok, _ := path.Match(pattern, path.Base(rel)); ok {
-		return true
-	}
-	ok, _ := path.Match(pattern, rel)
-	return ok
+	return nil
 }

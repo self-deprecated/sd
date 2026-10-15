@@ -3,6 +3,7 @@ package mirror_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/self-deprecated/sd/internal/config"
@@ -90,5 +91,37 @@ func assertAbsent(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("%s exists or stat failed with non-ENOENT: %v", path, err)
+	}
+}
+
+func TestBuildPlanAppliesRecursiveExcludes(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "project")
+	write(t, filepath.Join(source, "a", "private", "secret.txt"), "secret")
+	write(t, filepath.Join(source, "private", "top.txt"), "secret")
+	// A directory matching an exclude is pruned with everything below it.
+	write(t, filepath.Join(source, "a", "private", "deeper", "pruned.txt"), "secret")
+	write(t, filepath.Join(source, "a", "public.txt"), "public")
+	cfg := config.MirrorConfig{Source: source, Exclude: []string{"**/private/*"}}
+	plan, err := mirror.BuildPlan("app", root, cfg, filepath.Join(root, "mirror"))
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	assertOps(t, "files", plan.Files, []string{"a/public.txt"})
+}
+
+func TestBuildPlanRejectsMalformedPatterns(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "project")
+	write(t, filepath.Join(source, "README.md"), "hello")
+	for _, cfg := range []config.MirrorConfig{
+		{Source: source, Include: []string{"[abc"}},
+		{Source: source, Exclude: []string{"docs/[z-a"}},
+		{Source: source, Preserve: []string{"build**"}},
+	} {
+		_, err := mirror.BuildPlan("app", root, cfg, filepath.Join(root, "mirror"))
+		if err == nil || !strings.Contains(err.Error(), "pattern") {
+			t.Errorf("BuildPlan(%+v) error = %v, want pattern error", cfg, err)
+		}
 	}
 }
