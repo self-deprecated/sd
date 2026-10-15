@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,17 +46,47 @@ func TestRunShellTurnsInterruptIntoExitTrap(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("cannot send os.Interrupt to a process on Windows")
 	}
-	var out bytes.Buffer
+	out := &lockedBuffer{}
+	result := make(chan error, 1)
 	go func() {
-		time.Sleep(200 * time.Millisecond)
-		self, _ := os.FindProcess(os.Getpid())
-		_ = self.Signal(os.Interrupt)
+		result <- runShell(t.TempDir(), `trap 'printf cleaned' EXIT; printf ready; while true; do :; done`, nil, nil, Options{Stdout: out, Stderr: out})
 	}()
-	err := runShell(t.TempDir(), `trap 'printf cleaned' EXIT; while true; do :; done`, nil, nil, Options{Stdout: &out, Stderr: &out})
-	if err == nil || err.Error() != "exit status 130" {
-		t.Fatalf("err = %v, want exit status 130", err)
+	// runShell registers for os.Interrupt before the script prints ready.
+	for deadline := time.Now().Add(5 * time.Second); !strings.Contains(out.String(), "ready"); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("script never became ready; output %q", out.String())
+		}
 	}
-	if out.String() != "cleaned" {
+	self, _ := os.FindProcess(os.Getpid())
+	if err := self.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if err == nil || err.Error() != "exit status 130" {
+			t.Fatalf("err = %v, want exit status 130", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("task did not stop after interrupt")
+	}
+	if out.String() != "readycleaned" {
 		t.Fatalf("output = %q", out.String())
 	}
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

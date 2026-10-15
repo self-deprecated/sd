@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bufio"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -568,10 +567,11 @@ func scanMirrorPlan(plan mirror.Plan, opts Options) error {
 }
 
 func runMirrorChecks(plan mirror.Plan, opts Options) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
+	interrupts := make(chan os.Signal, 2)
+	signal.Notify(interrupts, os.Interrupt)
+	defer signal.Stop(interrupts)
 	for _, check := range plan.Checks {
-		if err := shell.Run(ctx, plan.WorkspaceRoot, check, nil, os.Environ(), opts.Stdin, opts.Stdout, opts.Stderr); err != nil {
+		if err := shell.Run(interrupts, plan.WorkspaceRoot, check, nil, os.Environ(), opts.Stdin, opts.Stdout, opts.Stderr); err != nil {
 			return err
 		}
 	}

@@ -2,7 +2,6 @@ package runner
 
 import (
 	"bufio"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -371,9 +370,10 @@ func composeSharedScripts(project *model.Project, task model.Task) (string, erro
 }
 
 func runShell(dir, script string, args []string, env map[string]string, opts Options) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	return shell.Run(ctx, dir, script, args, envList(env), opts.Stdin, opts.Stdout, opts.Stderr)
+	interrupts := make(chan os.Signal, 2)
+	signal.Notify(interrupts, os.Interrupt)
+	defer signal.Stop(interrupts)
+	return shell.Run(interrupts, dir, script, args, envList(env), opts.Stdin, opts.Stdout, opts.Stderr)
 }
 
 func commandEnvironment(dir string, envFiles []string, taskEnv map[string]string) (map[string]string, error) {
