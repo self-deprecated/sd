@@ -19,9 +19,10 @@ type listedTask struct {
 }
 
 func tasksCommand(opts Options, st *state) *cobra.Command {
-	return &cobra.Command{
+	var all bool
+	cmd := &cobra.Command{
 		Use:   "tasks [project]",
-		Short: "List tasks",
+		Short: "List tasks (of the current project, if any)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ws, err := discovery.LoadWorkspace(opts.WorkDir)
@@ -35,9 +36,14 @@ func tasksCommand(opts Options, st *state) *cobra.Command {
 				}
 				return listOneProjectTasks(p, opts, st.json)
 			}
+			if p, ok := currentProject(ws, opts.WorkDir); ok && !all {
+				return listOneProjectTasks(p, opts, st.json)
+			}
 			return listAllTasks(ws, opts, st.json)
 		},
 	}
+	cmd.Flags().BoolVar(&all, "all", false, "list every project's tasks and the workspace aggregates")
+	return cmd
 }
 
 func listAllTasks(ws *model.Workspace, opts Options, asJSON bool) error {

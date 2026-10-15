@@ -62,7 +62,10 @@ func explain(ws *model.Workspace, args []string, opts Options, st *state) error 
 	}
 	project, ok := ws.ProjectByID(args[0])
 	if !ok {
-		return fmt.Errorf("unknown project: %s", args[0])
+		if inProject, ok := inCurrentProject(ws, opts.WorkDir, args); ok {
+			return explain(ws, inProject, opts, st)
+		}
+		return runner.UsageError{Message: unknownProjectMessage(ws, args[0])}
 	}
 	if len(args) == 1 {
 		return childUsage(project.ID, model.ChildTasks(project.Tasks, ""))

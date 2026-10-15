@@ -295,6 +295,9 @@ func dispatch(ws *model.Workspace, args []string, opts Options, st *state) error
 	}
 	project, ok := ws.ProjectByID(args[0])
 	if !ok {
+		if inProject, ok := inCurrentProject(ws, opts.WorkDir, args); ok {
+			return dispatch(ws, inProject, opts, st)
+		}
 		return runner.UsageError{Message: unknownProjectMessage(ws, args[0])}
 	}
 	if len(args) == 1 {
