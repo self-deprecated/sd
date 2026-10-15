@@ -40,3 +40,26 @@ func assertInterruptKills(t *testing.T, script, pidFile string) {
 		t.Fatalf("command %d still running after Run returned", pid)
 	}
 }
+
+// Scripts without a shebang run in a nested interpreter; their background
+// commands must still be stopped.
+func TestInterruptKillsCommandsStartedByScriptsWithoutShebang(t *testing.T) {
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "pid")
+	script := fmt.Sprintf("SD_SHELL_HELPER=1 %q ignore-interrupt %q &\nwhile true; do :; done\n", os.Args[0], pidFile)
+	if err := os.WriteFile(filepath.Join(dir, "script"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	assertInterruptKills(t, fmt.Sprintf("cd %q && ./script", dir), pidFile)
+}
+
+func TestScriptsWithoutShebangGetArgsAndExportedEnv(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "script"), []byte(`printf '%s|%s|%s|%s' "$1" "$#" "$EXPORTED" "$LOCAL"`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, fmt.Sprintf(`cd %q && export EXPORTED=yes && LOCAL=no && ./script "two words" b`, dir))
+	if err != nil || out != "two words|2|yes|" {
+		t.Fatalf("out = %q err = %v", out, err)
+	}
+}

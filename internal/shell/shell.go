@@ -4,9 +4,12 @@
 package shell
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -109,8 +112,64 @@ func (c *commandTracker) track(interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 			}
 			c.mu.Unlock()
 		}()
+		if script, ok := shellScript(ctx, args[0]); ok {
+			return c.runScript(ctx, script, args)
+		}
 		return run(ctx, args)
 	}
+}
+
+// shellScript reads the file a command name resolves to if the kernel would
+// refuse to execute it (ENOEXEC): a file without a "#!" line that is not a
+// binary. Other shells, and the interpreter's own fallback, run such files
+// as shell scripts; sd does so itself so their commands are tracked too.
+func shellScript(ctx context.Context, name string) ([]byte, bool) {
+	if runtime.GOOS == "windows" {
+		return nil, false
+	}
+	hc := interp.HandlerCtx(ctx)
+	path, err := interp.LookPathDir(hc.Dir, hc.Env, name)
+	if err != nil {
+		return nil, false
+	}
+	content, err := os.ReadFile(path)
+	if err != nil || bytes.HasPrefix(content, []byte("#!")) {
+		return nil, false
+	}
+	// Like bash, treat a null byte before the first newline as a binary.
+	line, _, _ := bytes.Cut(content, []byte("\n"))
+	if bytes.IndexByte(line, 0) >= 0 {
+		return nil, false
+	}
+	return content, true
+}
+
+// runScript runs a script in a new shell that inherits only exported
+// variables, as other shells do, with the same command tracking.
+func (c *commandTracker) runScript(ctx context.Context, script []byte, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	file, err := syntax.NewParser().Parse(bytes.NewReader(script), args[0])
+	if err != nil {
+		fmt.Fprintln(hc.Stderr, err)
+		return interp.ExitStatus(2)
+	}
+	var env []string
+	for name, vr := range hc.Env.Each {
+		if vr.Exported && vr.IsSet() {
+			env = append(env, name+"="+vr.String())
+		}
+	}
+	runner, err := interp.New(
+		interp.ExecHandlers(c.track),
+		interp.Dir(hc.Dir),
+		interp.Env(expand.ListEnviron(env...)),
+		interp.StdIO(hc.Stdin, hc.Stdout, hc.Stderr),
+		interp.Params(append([]string{"--"}, args[1:]...)...),
+	)
+	if err != nil {
+		return err
+	}
+	return runner.Run(ctx, file)
 }
 
 func (c *commandTracker) idle() <-chan struct{} {
