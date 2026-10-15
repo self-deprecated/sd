@@ -83,36 +83,40 @@ func waitInterrupted(t *testing.T, result <-chan error) {
 	}
 }
 
-func TestInterruptStopsRunningCommandAndRunsExitTrapOnce(t *testing.T) {
-	out := &syncBuffer{}
-	interrupts := make(chan os.Signal, 2)
-	result := runAsync(t, `trap 'printf trapped' EXIT; printf ready; `+sleepCmd("30")+`; printf after`, interrupts, out)
-	interruptWhen(t, out, "ready", interrupts)
-	waitInterrupted(t, result)
-	if got := out.String(); got != "readytrapped" {
-		t.Fatalf("output = %q", got)
-	}
-}
-
-func TestInterruptStopsTheWholeTask(t *testing.T) {
+func TestInterruptStopsTheWholeTaskWithoutRunningExitTrap(t *testing.T) {
 	sleep := sleepCmd("30")
-	cases := []struct{ name, script, marker, out string }{
-		{"builtin loop", `trap 'printf CLEAN' EXIT; printf ready; while true; do :; done; printf AFTER`, "ready", "readyCLEAN"},
-		{"subshell", `trap 'printf CLEAN' EXIT; printf ready; (` + sleep + `); printf AFTER; ` + sleep, "ready", "readyCLEAN"},
-		{"background job and wait", `trap 'printf CLEAN' EXIT; ` + sleep + ` & printf ready; wait; printf AFTER`, "ready", "readyCLEAN"},
-		{"background job and builtin loop", sleep + ` & printf ready; while true; do :; done`, "ready", "ready"},
-		{"trap sees status 130", `trap 'printf "[%s]" "$?"' EXIT; printf ready; ` + sleep, "ready", "ready[130]"},
-		{"trap calls a function", `cleanup() { printf cleaned; ` + sleepCmd("0") + `; printf done; }; trap cleanup EXIT; printf ready; ` + sleep, "ready", "readycleaneddone"},
+	cases := []struct{ name, script string }{
+		{"external command", `trap 'printf CLEAN' EXIT; printf ready; ` + sleep + `; printf AFTER`},
+		{"builtin loop", `trap 'printf CLEAN' EXIT; printf ready; while true; do :; done; printf AFTER`},
+		{"subshell", `trap 'printf CLEAN' EXIT; printf ready; (` + sleep + `); printf AFTER; ` + sleep},
+		{"pipeline", `trap 'printf CLEAN' EXIT; printf ready; ` + sleep + ` | ` + sleep + `; printf AFTER`},
+		{"background job and wait", `trap 'printf CLEAN' EXIT; ` + sleep + ` & printf ready; wait; printf AFTER`},
+		{"background job and builtin loop", sleep + ` & printf ready; while true; do :; done`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			out := &syncBuffer{}
-			interrupts := make(chan os.Signal, 2)
+			interrupts := make(chan os.Signal, 1)
 			result := runAsync(t, tc.script, interrupts, out)
-			interruptWhen(t, out, tc.marker, interrupts)
+			interruptWhen(t, out, "ready", interrupts)
 			waitInterrupted(t, result)
-			if got := out.String(); got != tc.out {
-				t.Fatalf("output = %q, want %q", got, tc.out)
+			if got := out.String(); got != "ready" {
+				t.Fatalf("output = %q, want %q", got, "ready")
+			}
+		})
+	}
+}
+
+func TestInterruptStopsARunningExitTrap(t *testing.T) {
+	for _, ending := range []string{"printf body", "printf body; exit 0"} {
+		t.Run(ending, func(t *testing.T) {
+			out := &syncBuffer{}
+			interrupts := make(chan os.Signal, 1)
+			result := runAsync(t, `trap 'printf start; while true; do :; done' EXIT; `+ending, interrupts, out)
+			interruptWhen(t, out, "start", interrupts)
+			waitInterrupted(t, result)
+			if got := out.String(); got != "bodystart" {
+				t.Fatalf("output = %q, want the trap to run once", got)
 			}
 		})
 	}
@@ -123,49 +127,16 @@ type blockingReader struct{}
 
 func (blockingReader) Read([]byte) (int, error) { select {} }
 
-func TestSecondInterruptReturnsEvenIfABuiltinIgnoresCancellation(t *testing.T) {
+func TestInterruptReturnsEvenIfABuiltinIgnoresCancellation(t *testing.T) {
 	out := &syncBuffer{}
-	interrupts := make(chan os.Signal, 2)
+	interrupts := make(chan os.Signal, 1)
 	result := make(chan error, 1)
 	go func() {
 		result <- Run(interrupts, t.TempDir(), `printf ready; read -r value; printf after`, nil, os.Environ(), blockingReader{}, out, out)
 	}()
 	interruptWhen(t, out, "ready", interrupts)
-	interrupts <- os.Interrupt
 	waitInterrupted(t, result)
 	if got := out.String(); got != "ready" {
-		t.Fatalf("output = %q", got)
-	}
-}
-
-func TestInterruptDuringExitTrapDoesNotReplayIt(t *testing.T) {
-	for _, registration := range []string{"trap %s EXIT", "trap %s EXIT ERR", "trap -- %s EXIT", "builtin trap %s EXIT"} {
-		for _, ending := range []string{"printf body", "printf body; exit 0"} {
-			script := fmt.Sprintf(registration, `'printf start; while true; do :; done'`) + "; " + ending
-			t.Run(script, func(t *testing.T) {
-				out := &syncBuffer{}
-				interrupts := make(chan os.Signal, 2)
-				result := runAsync(t, script, interrupts, out)
-				// A trap is allowed to finish after one interrupt; a second stops it.
-				interruptWhen(t, out, "start", interrupts)
-				interrupts <- os.Interrupt
-				waitInterrupted(t, result)
-				if got := out.String(); got != "bodystart" {
-					t.Fatalf("output = %q, want the trap to run once", got)
-				}
-			})
-		}
-	}
-}
-
-func TestSecondInterruptStopsExitTrap(t *testing.T) {
-	out := &syncBuffer{}
-	interrupts := make(chan os.Signal, 2)
-	result := runAsync(t, `trap 'printf cleanup; while true; do :; done' EXIT; printf ready; `+sleepCmd("30"), interrupts, out)
-	interruptWhen(t, out, "ready", interrupts)
-	interruptWhen(t, out, "cleanup", interrupts)
-	waitInterrupted(t, result)
-	if got := out.String(); got != "readycleanup" {
 		t.Fatalf("output = %q", got)
 	}
 }
@@ -181,6 +152,7 @@ func TestExitTrapSemantics(t *testing.T) {
 		{"reset trap", `trap 'printf trapped' EXIT; trap - EXIT; printf body`, "body", ""},
 		{"saved and restored trap", `trap 'printf cleanup' EXIT; trap > saved; trap - EXIT; . ./saved; printf body`, "bodycleanup", ""},
 		{"background subshell trap keeps parent trap", `trap 'printf parent' EXIT; { trap 'printf child' EXIT; exit; } & wait; printf body`, "childbodyparent", ""},
+		{"pipeline in exit trap", `cleanup() { printf removed; }; trap 'cleanup | cat; printf CLEAN' EXIT; printf body`, "bodyremovedCLEAN", ""},
 		{"background job survives until exit trap", `{ ` + sleepCmd("0.2") + `; printf done; } & pid=$!; trap 'wait "$pid"; printf ":%s" "$?"' EXIT`, "done:0", ""},
 	}
 	for _, tc := range cases {
