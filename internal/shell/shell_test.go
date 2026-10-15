@@ -178,3 +178,10 @@ func TestExitTrapSemantics(t *testing.T) {
 		})
 	}
 }
+
+// Tasks used to run as `bash -c script sd args...`, so $0 is "sd".
+func TestScriptNameIsSd(t *testing.T) {
+	if out, err := run(t, `printf '%s' "$0"`); err != nil || out != "sd" {
+		t.Fatalf("$0 = %q err = %v", out, err)
+	}
+}
