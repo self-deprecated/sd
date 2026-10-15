@@ -1,0 +1,29 @@
+version: 1
+
+project:
+  id: sd
+  name: sd task dispatcher
+  workArea: Developer tooling
+  visibility: public-code
+  dir: .
+
+tasks:
+  test:
+    desc: Run unit tests
+    run: go test ./...
+
+  vet:
+    desc: Run go vet
+    run: go vet ./...
+
+  check:
+    desc: Run formatting, vet, and tests
+    run: test -z "$(gofmt -l .)" && go vet ./... && go test ./...
+
+  build/all:
+    desc: Cross-compile sd for every release target
+    run: |
+      for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+        GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/sd || exit 1
+        echo "built $target"
+      done
