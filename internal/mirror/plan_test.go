@@ -3,6 +3,7 @@ package mirror_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -124,4 +125,50 @@ func TestBuildPlanRejectsMalformedPatterns(t *testing.T) {
 			t.Errorf("BuildPlan(%+v) error = %v, want pattern error", cfg, err)
 		}
 	}
+}
+
+func TestBuildPlanUpdatesFilesWhoseExecutableBitDiffers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no executable bit")
+	}
+	root := t.TempDir()
+	source := filepath.Join(root, "project")
+	dest := filepath.Join(root, "mirror")
+	write(t, filepath.Join(source, "run.sh"), "#!/bin/sh\n")
+	write(t, filepath.Join(source, "same.txt"), "same")
+	write(t, filepath.Join(dest, "run.sh"), "#!/bin/sh\n")
+	write(t, filepath.Join(dest, "same.txt"), "same")
+	if err := os.Chmod(filepath.Join(source, "run.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := mirror.BuildPlan("app", root, config.MirrorConfig{Source: source}, dest)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	assertOps(t, "updates", plan.Updates, []string{"run.sh"})
+	if err := mirror.ApplyPlan(plan); err != nil {
+		t.Fatalf("ApplyPlan: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(dest, "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("run.sh mode = %v, want executable", info.Mode())
+	}
+}
+
+func TestBuildPlanUpdatesFilesWithSameSizeDifferentContent(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "project")
+	dest := filepath.Join(root, "mirror")
+	write(t, filepath.Join(source, "a.txt"), "abcd")
+	write(t, filepath.Join(dest, "a.txt"), "abce")
+	write(t, filepath.Join(source, "b.txt"), "short")
+	write(t, filepath.Join(dest, "b.txt"), "longer")
+	plan, err := mirror.BuildPlan("app", root, config.MirrorConfig{Source: source}, dest)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	assertOps(t, "updates", plan.Updates, []string{"a.txt", "b.txt"})
 }

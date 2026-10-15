@@ -3,9 +3,11 @@ package mirror
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -188,16 +190,53 @@ func destinationFiles(root string, preserve []string) (map[string]string, error)
 	return out, nil
 }
 
+// sameFile reports whether b already has a's content and, outside Windows,
+// a's executable bit. Content is compared in chunks rather than read whole.
 func sameFile(a, b string) (bool, error) {
-	adata, err := os.ReadFile(a)
+	ainfo, err := os.Stat(a)
 	if err != nil {
 		return false, err
 	}
-	bdata, err := os.ReadFile(b)
+	binfo, err := os.Stat(b)
 	if err != nil {
 		return false, err
 	}
-	return bytes.Equal(adata, bdata), nil
+	if ainfo.Size() != binfo.Size() {
+		return false, nil
+	}
+	if runtime.GOOS != "windows" && (ainfo.Mode()&0o111 == 0) != (binfo.Mode()&0o111 == 0) {
+		return false, nil
+	}
+	af, err := os.Open(a)
+	if err != nil {
+		return false, err
+	}
+	defer af.Close()
+	bf, err := os.Open(b)
+	if err != nil {
+		return false, err
+	}
+	defer bf.Close()
+	abuf := make([]byte, 64*1024)
+	bbuf := make([]byte, 64*1024)
+	for {
+		an, aerr := io.ReadFull(af, abuf)
+		bn, berr := io.ReadFull(bf, bbuf)
+		if !bytes.Equal(abuf[:an], bbuf[:bn]) {
+			return false, nil
+		}
+		aend := aerr == io.EOF || aerr == io.ErrUnexpectedEOF
+		bend := berr == io.EOF || berr == io.ErrUnexpectedEOF
+		if aerr != nil && !aend {
+			return false, aerr
+		}
+		if berr != nil && !bend {
+			return false, berr
+		}
+		if aend || bend {
+			return aend && bend, nil
+		}
+	}
 }
 
 func sortOps(ops []FileOp) {
