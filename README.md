@@ -24,6 +24,7 @@ Or with Nix: see [Nix](#nix).
 - `trap` supports `EXIT` and `ERR` only, and `$(trap)` does not list the parent shell's traps.
 - Ctrl-C stops the whole task at once, including subshells, pipelines, background jobs, and a running `EXIT` trap, and the task exits with status 130. Unlike bash, `EXIT` traps do not run after Ctrl-C, so cleanup that must survive an interrupt should not rely on them.
 - External programs are looked up on `PATH` (with `PATHEXT` on Windows, so shims such as `npm.cmd` work).
+- In an assignment, a backslash-escaped quote outside quotes keeps its backslash (`v=it\'s` gives `it\'s`); write `v="it's"` instead.
 - On Windows, process substitution (`<( )`) is not supported, tools such as `cat`, `rm`, or `grep` must be installed and on `PATH`, and a script with a shebang cannot be executed directly: call its interpreter explicitly, for example `bash ./scripts/build.sh`.
 
 ## Common commands
@@ -53,6 +54,20 @@ sd demo mobile
 sd demo mobile/build
 ```
 
+### Current project
+
+Inside a Project's directory, or anywhere in a repository with a single Project, the project id can be left out: `sd test` runs the current Project's `test` task, and `sd explain test` explains it. Project ids and aggregates take precedence over the current Project's task names. `sd tasks` lists the current Project's tasks; `sd tasks --all` lists every Project and aggregate.
+
+### Flags and exit status
+
+`--yes`, `--json`, `--mode <name>`, `--log-file <path>`, and `--var name=value` may appear anywhere before `--`. Everything after the first `--` is passed to the task untouched, so use it for arguments that look like sd flags:
+
+```sh
+sd example npm -- install --var-like-flag
+```
+
+`sd` exits with a failed task's own exit status (130 when interrupted), 2 for usage errors such as an unknown task or a missing flag value, and 1 for other errors.
+
 ## Interactive picker
 
 When attached to a TTY, running bare `sd` opens the workspace-root picker regardless of the current Project directory; an incomplete path opens the picker at that explicit path.
@@ -72,14 +87,16 @@ Useful keys/features:
 
 Tasks can declare runtime inputs under `options:` and reference them in `run`, `dir`, `env`, and `envFiles` with `{{name}}`. Supported input types are `enum`, `string`/`text`, and integer-only `integer`/`number`.
 
-Use repeated `--var name=value` for non-interactive overrides:
+Use repeated `--var name=value` for non-interactive overrides. A `--var` for a variable the task does not declare is an error:
 
 ```sh
 sd example deploy --var target=prod --var message="ship it"
 sd explain example deploy --var target=prod --var message="ship it" --json
 ```
 
-Defaults apply first, then choice values, mode values, and finally explicit `--var` overrides. Referenced inputs without a default are required unless `required: false` is set.
+Values resolve in this order, later winning: option defaults, variables derived from the selected enum values (`vars:`), choice values, mode values, and finally `--var`. If two selected values derive different values for the same variable, the task fails rather than picking one. Referenced inputs without a default are required unless `required: false` is set.
+
+Values are never parsed as shell code. In `run`, each `{{name}}` expands to a shell variable holding the value, so `--var 'message=$(rm -rf ~)'` stays literal text whether the placeholder is double-quoted, single-quoted, or unquoted. An unquoted placeholder still splits into words, which keeps suffixes such as `publish{{publishArgs}}` with `publishArgs: " --dry-run"` working. Placeholders inside a quoted here-document (`<<'EOF'`) are not expanded. `explain` shows the command with values substituted for readability. In `dir`, `env`, and `envFiles` the value is substituted as text.
 
 ## JSON for agents
 
@@ -89,17 +106,29 @@ sd tasks --json
 sd explain demo mobile build ios-dev --json
 ```
 
-Example `explain` output:
+JSON output is versioned. Every document has `"version": 1`; fields are always present, with empty strings, lists, and maps rather than `null`. A breaking change to these shapes will bump the version.
+
+- `projects --json`: `{"version": 1, "projects": [{"id", "name", "aliases", "workArea", "visibility", "path"}]}`.
+- `tasks --json`: `{"version": 1, "tasks": [{"project", "id", "choice", "desc", "danger", "modes", "defaultMode"}]}`. A task with choices has one row without a choice and one per choice; `project` is empty for workspace aggregates; `danger` is the danger under the default mode.
+- `explain --json`:
 
 ```json
 {
+  "version": 1,
   "project": "landing",
   "id": "deploy",
+  "choice": "",
+  "mode": "",
   "desc": "Build and deploy via FTP",
   "run": "npm run build && ./deploy.sh",
   "dir": "/repo/projects/landing",
+  "env": {},
+  "envFiles": [".env"],
   "requiresEnv": ["FTP_USER", "FTP_PASSWORD"],
-  "danger": true
+  "danger": true,
+  "depends": [],
+  "scripts": [],
+  "values": {}
 }
 ```
 
@@ -215,6 +244,8 @@ tasks:
 
 ## Manifest reference
 
+Every manifest must start with `version: 1`. Unknown keys are errors, so a typo such as `dangerous: true` fails instead of being ignored; so do duplicate project ids, an alias that is another project's id or another project's alias, and a passthrough with the same id as a task.
+
 Project manifests live at `.sd/tasks.yaml`:
 
 ```yaml
@@ -253,8 +284,8 @@ tasks:
 - `envFiles`: optional `.env`-style files loaded before the task runs. Relative paths are resolved from the task working directory; missing files are ignored so shell env can still satisfy `requiresEnv`. Later files override earlier files; shell env overrides file values; task `env` overrides both.
 - `requiresEnv`: environment variables that must be non-empty after `envFiles`, the shell environment, and task `env` are merged.
 - `danger`: require `--yes` / confirmation before running.
-- `whenChanged`: optional workspace-root glob list. If present, the task is a no-op unless changed files match one of the patterns. `sd` reads changed files from `SD_CHANGED_FILES` when set (even if empty), then `SD_CHANGE_BASE` via `jj diff --from <base> --name-only` / Git range diff, then the current working-copy diff via `jj diff --name-only` / `git diff --name-only HEAD`.
-- `depends`: other tasks to run first, written as `project:task/path`, `project:task/path choice`, or `task/path` for an aggregate task.
+- `whenChanged`: optional glob list. If present, the task is a no-op unless a changed file matches one of the patterns. Patterns are relative to the Project root (to the workspace root for aggregates); start a pattern with `/` to make it workspace-root relative. `*` and `?` match within one path segment, `**` matches across segments, and `**/` also matches no directory at all (`**/*.go` matches `main.go`). `sd` reads changed files from `SD_CHANGED_FILES` when set (even if empty), otherwise from `SD_CHANGE_BASE` via `jj diff --from <base> --name-only` or `git diff --name-only <base>...HEAD` (failing if neither can resolve the base), otherwise from the working-copy diff via `jj diff --name-only` or `git diff --name-only HEAD`.
+- `depends`: other tasks to run first, written as `project:task/path`, `project:task/path choice`, or `task/path` for an aggregate task. The task's own `run`, if any, runs after them; a choice that lists `depends` without its own `run` only runs its dependencies. Dependencies inherit the effective mode, including a default mode: a dependency with modes must define that mode, and one without modes ignores it. Dependency cycles are reported as errors.
 - `scripts`: names of project-level shared scripts to run in order in the same shell immediately before `run`.
 - `options`: typed inputs used by choices and `{{template}}` rendering.
 - `choices`: named presets for one task.
