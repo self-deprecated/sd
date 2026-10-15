@@ -28,6 +28,7 @@ type mirrorFlags struct {
 }
 
 type mirrorExplain struct {
+	Version     int      `json:"version"`
 	ID          string   `json:"id"`
 	Source      string   `json:"source"`
 	Destination string   `json:"destination"`
@@ -174,7 +175,7 @@ func mirrorCheckCommand(opts Options, st *state, flags *mirrorFlags) *cobra.Comm
 			if err != nil {
 				return err
 			}
-			return runMirrorCheck(ctx, id, opts)
+			return runMirrorCheck(ctx, id, opts, st)
 		},
 	}
 }
@@ -249,7 +250,19 @@ func loadMirrorContext(opts Options, flags *mirrorFlags) (mirrorContext, error) 
 func listMirrors(ctx mirrorContext, opts Options, asJSON bool) error {
 	ids := ctx.config.SortedMirrorIDs()
 	if asJSON {
-		return writeJSON(opts.Stdout, ids)
+		type listedMirror struct {
+			ID         string `json:"id"`
+			Visibility string `json:"visibility"`
+		}
+		mirrors := []listedMirror{}
+		for _, id := range ids {
+			cfg, _ := ctx.config.Mirror(id)
+			mirrors = append(mirrors, listedMirror{ID: id, Visibility: cfg.Visibility})
+		}
+		return writeJSON(opts.Stdout, struct {
+			Version int            `json:"version"`
+			Mirrors []listedMirror `json:"mirrors"`
+		}{1, mirrors})
 	}
 	for _, id := range ids {
 		cfg, _ := ctx.config.Mirror(id)
@@ -309,7 +322,7 @@ func runPickedMirrorAction(ctx mirrorContext, id, action string, opts Options, s
 	case "plan":
 		return runMirrorPlan(ctx, id, opts, st, flags)
 	case "check":
-		return runMirrorCheck(ctx, id, opts)
+		return runMirrorCheck(ctx, id, opts, st)
 	case "sync":
 		return runMirrorSync(ctx, id, opts, st)
 	case "commit", "publish":
@@ -351,7 +364,7 @@ func runMirrorExplain(ctx mirrorContext, id string, opts Options, st *state) err
 	if err != nil {
 		return formatResolveError(err)
 	}
-	exp := mirrorExplain{ID: id, Source: cfg.Source, Destination: destination, Bookmark: cfg.Bookmark, Remote: cfg.Remote, Visibility: cfg.Visibility, Include: cfg.Include, Exclude: cfg.Exclude, Preserve: cfg.Preserve, Overlays: cfg.Overlays, Checks: cfg.Checks}
+	exp := mirrorExplain{Version: 1, ID: id, Source: cfg.Source, Destination: destination, Bookmark: cfg.Bookmark, Remote: cfg.Remote, Visibility: cfg.Visibility, Include: cfg.Include, Exclude: cfg.Exclude, Preserve: cfg.Preserve, Overlays: cfg.Overlays, Checks: cfg.Checks}
 	if st.json {
 		return writeJSON(opts.Stdout, exp)
 	}
@@ -374,15 +387,30 @@ func runMirrorPlan(ctx mirrorContext, id string, opts Options, st *state, flags 
 	}
 	plan.MirrorStatus = ctx.destinationStatus(plan.Destination)
 	if st.json {
-		return writeJSON(opts.Stdout, plan)
+		return writeJSON(opts.Stdout, struct {
+			Version int `json:"version"`
+			mirror.Plan
+		}{1, plan})
 	}
 	return printPlan(opts.Stdout, plan, flags)
 }
 
-func runMirrorCheck(ctx mirrorContext, id string, opts Options) error {
+// mirrorCheckResult is the output of `sd mirror check --json` (version 1).
+type mirrorCheckResult struct {
+	Version       int                  `json:"version"`
+	Mirror        string               `json:"mirror"`
+	Passed        bool                 `json:"passed"`
+	ExportedFiles int                  `json:"exportedFiles"`
+	Findings      []mirror.ScanFinding `json:"findings"`
+}
+
+func runMirrorCheck(ctx mirrorContext, id string, opts Options, st *state) error {
 	plan, err := ctx.buildPlan(id)
 	if err != nil {
 		return err
+	}
+	if st.json {
+		return runMirrorCheckJSON(plan, opts)
 	}
 	if err := scanMirrorPlan(plan, opts); err != nil {
 		return err
@@ -396,6 +424,30 @@ func runMirrorCheck(ctx mirrorContext, id string, opts Options) error {
 	}
 	fmt.Fprintln(opts.Stdout)
 	return nil
+}
+
+// runMirrorCheckJSON reports the scan and checks as JSON; configured checks
+// write to stderr so stdout stays parseable.
+func runMirrorCheckJSON(plan mirror.Plan, opts Options) error {
+	report, err := mirror.ScanPlan(plan)
+	if err != nil {
+		return err
+	}
+	result := mirrorCheckResult{Version: 1, Mirror: plan.MirrorID, ExportedFiles: len(plan.Files), Findings: append([]mirror.ScanFinding{}, report.Findings...)}
+	var checkErr error
+	if !report.HasFindings() {
+		checkOpts := opts
+		checkOpts.Stdout = opts.Stderr
+		checkErr = runMirrorChecks(plan, checkOpts)
+	}
+	result.Passed = !report.HasFindings() && checkErr == nil
+	if err := writeJSON(opts.Stdout, result); err != nil {
+		return err
+	}
+	if report.HasFindings() {
+		return runner.UsageError{Message: report.Error()}
+	}
+	return checkErr
 }
 
 func runMirrorSync(ctx mirrorContext, id string, opts Options, st *state) error {

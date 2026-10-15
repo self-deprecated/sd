@@ -145,12 +145,17 @@ func TestMirrorListExplainJSONAndDestinationPrecedence(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("list json code=%d stderr=%s", code, stderr)
 	}
-	var ids []string
-	if err := json.Unmarshal([]byte(stdout), &ids); err != nil {
+	var list struct {
+		Version int `json:"version"`
+		Mirrors []struct {
+			ID string `json:"id"`
+		} `json:"mirrors"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &list); err != nil {
 		t.Fatalf("list json parse: %v\n%s", err, stdout)
 	}
-	if len(ids) != 1 || ids[0] != "demo" {
-		t.Fatalf("ids = %#v", ids)
+	if list.Version != 1 || len(list.Mirrors) != 1 || list.Mirrors[0].ID != "demo" {
+		t.Fatalf("list = %#v", list)
 	}
 
 	stdout, stderr, code = execute(t, root, "mirror", "explain", "demo", "--json")
