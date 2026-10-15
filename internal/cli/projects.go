@@ -27,9 +27,26 @@ func projectsCommand(opts Options, st *state) *cobra.Command {
 	}
 }
 
+// listedProject is one row of `sd projects --json` (schema version 1).
+type listedProject struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Aliases    []string `json:"aliases"`
+	WorkArea   string   `json:"workArea"`
+	Visibility string   `json:"visibility"`
+	Path       string   `json:"path"`
+}
+
 func listProjects(ws *model.Workspace, out interface{ Write([]byte) (int, error) }, asJSON bool) error {
 	if asJSON {
-		return writeJSON(out, ws.SortedProjects())
+		projects := []listedProject{}
+		for _, p := range ws.SortedProjects() {
+			projects = append(projects, listedProject{ID: p.ID, Name: p.Name, Aliases: append([]string{}, p.Aliases...), WorkArea: p.WorkArea, Visibility: p.Visibility, Path: p.Path})
+		}
+		return writeJSON(out, struct {
+			Version  int             `json:"version"`
+			Projects []listedProject `json:"projects"`
+		}{1, projects})
 	}
 	currentArea := "\x00"
 	for _, project := range ws.SortedProjects() {

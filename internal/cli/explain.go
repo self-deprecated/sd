@@ -13,21 +13,24 @@ import (
 	"github.com/self-deprecated/sd/internal/runner"
 )
 
+// explanation is the output of `sd explain --json` (schema version 1).
+// Project is empty for workspace aggregates.
 type explanation struct {
-	Project     string            `json:"project,omitempty"`
+	Version     int               `json:"version"`
+	Project     string            `json:"project"`
 	ID          string            `json:"id"`
-	Choice      string            `json:"choice,omitempty"`
-	Mode        string            `json:"mode,omitempty"`
-	Desc        string            `json:"desc,omitempty"`
-	Run         string            `json:"run,omitempty"`
-	Dir         string            `json:"dir,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	EnvFiles    []string          `json:"envFiles,omitempty"`
-	RequiresEnv []string          `json:"requiresEnv,omitempty"`
-	Danger      bool              `json:"danger,omitempty"`
-	Depends     []string          `json:"depends,omitempty"`
-	Scripts     []string          `json:"scripts,omitempty"`
-	Values      map[string]string `json:"values,omitempty"`
+	Choice      string            `json:"choice"`
+	Mode        string            `json:"mode"`
+	Desc        string            `json:"desc"`
+	Run         string            `json:"run"`
+	Dir         string            `json:"dir"`
+	Env         map[string]string `json:"env"`
+	EnvFiles    []string          `json:"envFiles"`
+	RequiresEnv []string          `json:"requiresEnv"`
+	Danger      bool              `json:"danger"`
+	Depends     []string          `json:"depends"`
+	Scripts     []string          `json:"scripts"`
+	Values      map[string]string `json:"values"`
 }
 
 func explainCommand(opts Options, st *state) *cobra.Command {
@@ -100,6 +103,14 @@ func explain(ws *model.Workspace, args []string, opts Options, st *state) error 
 
 func writeExplanation(exp explanation, opts Options, asJSON bool) error {
 	if asJSON {
+		exp.Version = 1
+		exp.Env = nonNilMap(exp.Env)
+		exp.Values = nonNilMap(exp.Values)
+		for _, list := range []*[]string{&exp.EnvFiles, &exp.RequiresEnv, &exp.Depends, &exp.Scripts} {
+			if *list == nil {
+				*list = []string{}
+			}
+		}
 		return writeJSON(opts.Stdout, exp)
 	}
 	if exp.Project != "" {
@@ -159,4 +170,11 @@ func formatValues(values map[string]string) string {
 		parts = append(parts, key+"="+values[key])
 	}
 	return strings.Join(parts, ", ")
+}
+
+func nonNilMap(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
 }
