@@ -5,11 +5,11 @@ package shell
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"os"
 	"strings"
-	"sync/atomic"
+	"sync"
 
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
@@ -17,16 +17,22 @@ import (
 )
 
 // Run executes script in dir with env as the complete environment and args
-// as the positional parameters. A value received on interrupts stops the
-// script.
+// as the positional parameters.
+//
+// A value received on interrupts acts like Ctrl-C in bash: the external
+// commands running at that moment are stopped and the shell exits through
+// its EXIT trap. If only builtins are running, or on a second interrupt, the
+// script stops immediately. An interrupted script returns exit status 130.
 func Run(interrupts <-chan os.Signal, dir, script string, args, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(script), "sd")
 	if err != nil {
 		return err
 	}
-	var trapStarted atomic.Bool
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	commands := &runningCommands{stop: stop, running: map[*runningCommand]bool{}}
 	runner, err := interp.New(
-		interp.CallHandler(markExitTrap(&trapStarted)),
+		interp.ExecHandlers(commands.track),
 		interp.Dir(dir),
 		interp.Env(expand.ListEnviron(env...)),
 		interp.StdIO(stdin, stdout, stderr),
@@ -35,89 +41,84 @@ func Run(interrupts <-chan os.Signal, dir, script string, args, env []string, st
 	if err != nil {
 		return err
 	}
-	marker, _ := syntax.NewParser().Parse(strings.NewReader(exitTrapMarker+`() { return "$1"; }`), "sd")
-	if err := runner.Run(context.Background(), marker.Stmts[0]); err != nil {
-		return err
-	}
-	// The first interrupt stops the script; the next one stops its EXIT trap.
-	scriptCtx, stopScript := context.WithCancel(context.Background())
-	defer stopScript()
-	trapCtx, stopTrap := context.WithCancel(context.Background())
-	defer stopTrap()
-	var interrupted atomic.Bool
+
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
 		for {
 			select {
 			case <-interrupts:
-				interrupted.Store(true)
-				if scriptCtx.Err() == nil {
-					stopScript()
-					continue
-				}
-				stopTrap()
-				return
+				commands.interrupt()
 			case <-done:
 				return
 			}
 		}
 	}()
 
-	for _, stmt := range file.Stmts {
-		err = runner.Run(scriptCtx, stmt)
-		if runner.Exited() || scriptCtx.Err() != nil {
-			break
-		}
-	}
-	if trapStarted.Load() || (runner.Exited() && !interrupted.Load()) {
-		// exit or errexit already ran the EXIT trap; never run it twice.
-		return interruptedStatus(&interrupted, err)
-	}
-	stopScript()
-	code := 130
-	if !interrupted.Load() {
-		code = exitCode(err)
-	}
-	exit, _ := syntax.NewParser().Parse(strings.NewReader(fmt.Sprintf("exit %d", code)), "sd")
-	trapErr := runner.Run(trapCtx, exit)
-	if _, ok := interp.IsExitStatus(err); err != nil && !ok && !interrupted.Load() {
-		return err
-	}
-	return interruptedStatus(&interrupted, trapErr)
-}
-
-const exitTrapMarker = "__sd_exit_trap_started"
-
-// markExitTrap prefixes EXIT traps with a call to the marker function so Run
-// can tell whether the trap has started. The marker returns the status it is
-// given, so the trap still sees the script's $?.
-func markExitTrap(started *atomic.Bool) interp.CallHandlerFunc {
-	return func(_ context.Context, args []string) ([]string, error) {
-		switch {
-		case args[0] == exitTrapMarker:
-			started.Store(true)
-		case len(args) == 3 && args[0] == "trap" && args[2] == "EXIT" && args[1] != "" && args[1] != "-":
-			return []string{"trap", exitTrapMarker + ` "$?"` + "\n" + args[1], "EXIT"}, nil
-		}
-		return args, nil
-	}
-}
-
-// interruptedStatus reports 130, as bash does after SIGINT, once interrupted.
-func interruptedStatus(interrupted *atomic.Bool, err error) error {
-	if interrupted.Load() {
+	err = runner.Run(ctx, file)
+	if commands.wasInterrupted() {
 		return interp.ExitStatus(130)
 	}
 	return err
 }
 
-func exitCode(err error) int {
-	if err == nil {
-		return 0
+// errInterrupted halts the interpreter, which then runs the EXIT trap.
+var errInterrupted = errors.New("interrupted")
+
+type runningCommand struct {
+	cancel      context.CancelFunc
+	interrupted bool
+}
+
+// runningCommands tracks the external commands the interpreter is running.
+type runningCommands struct {
+	mu          sync.Mutex
+	stop        context.CancelFunc
+	running     map[*runningCommand]bool
+	interrupted bool
+}
+
+func (c *runningCommands) interrupt() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.interrupted || len(c.running) == 0 {
+		c.interrupted = true
+		c.stop()
+		return
 	}
-	if status, ok := interp.IsExitStatus(err); ok {
-		return int(status)
+	c.interrupted = true
+	for command := range c.running {
+		command.interrupted = true
+		command.cancel()
 	}
-	return 1
+}
+
+func (c *runningCommands) wasInterrupted() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.interrupted
+}
+
+// track reports a command stopped by an interrupt as errInterrupted, so the
+// shell running it exits instead of continuing with the next command.
+func (c *runningCommands) track(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+	return func(ctx context.Context, args []string) error {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		command := &runningCommand{cancel: cancel}
+		c.mu.Lock()
+		c.running[command] = true
+		c.mu.Unlock()
+
+		err := next(ctx, args)
+
+		c.mu.Lock()
+		delete(c.running, command)
+		interrupted := command.interrupted
+		c.mu.Unlock()
+		if interrupted {
+			return errInterrupted
+		}
+		return err
+	}
 }

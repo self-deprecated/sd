@@ -2,12 +2,28 @@ package shell
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+// The test binary doubles as a portable external command for scripts:
+// `SD_SHELL_HELPER=1 "$TESTBIN" sleep <seconds>`.
+func TestMain(m *testing.M) {
+	if os.Getenv("SD_SHELL_HELPER") == "1" && len(os.Args) == 3 && os.Args[1] == "sleep" {
+		d, _ := time.ParseDuration(os.Args[2] + "s")
+		time.Sleep(d)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+func sleepCmd(seconds string) string {
+	return fmt.Sprintf(`SD_SHELL_HELPER=1 %q sleep %s`, os.Args[0], seconds)
+}
 
 // syncBuffer lets a test read output while the interpreter writes it.
 type syncBuffer struct {
@@ -27,6 +43,13 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
+func run(t *testing.T, script string) (string, error) {
+	t.Helper()
+	var out bytes.Buffer
+	err := Run(nil, t.TempDir(), script, nil, os.Environ(), nil, &out, &out)
+	return out.String(), err
+}
+
 // runAsync runs script and returns a channel with its result.
 func runAsync(t *testing.T, script string, interrupts chan os.Signal, out *syncBuffer) <-chan error {
 	t.Helper()
@@ -38,7 +61,7 @@ func runAsync(t *testing.T, script string, interrupts chan os.Signal, out *syncB
 // interruptWhen sends an interrupt once out contains marker.
 func interruptWhen(t *testing.T, out *syncBuffer, marker string, interrupts chan os.Signal) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for !strings.Contains(out.String(), marker) {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %q; output %q", marker, out.String())
@@ -48,100 +71,92 @@ func interruptWhen(t *testing.T, out *syncBuffer, marker string, interrupts chan
 	interrupts <- os.Interrupt
 }
 
-func waitResult(t *testing.T, result <-chan error) error {
+func waitInterrupted(t *testing.T, result <-chan error) {
 	t.Helper()
 	select {
 	case err := <-result:
-		return err
-	case <-time.After(5 * time.Second):
+		if err == nil || err.Error() != "exit status 130" {
+			t.Fatalf("err = %v, want exit status 130", err)
+		}
+	case <-time.After(10 * time.Second):
 		t.Fatal("script did not stop")
-		return nil
 	}
 }
 
-func TestRunStopsOnInterruptAndRunsExitTrap(t *testing.T) {
+func TestInterruptStopsRunningCommandAndRunsExitTrapOnce(t *testing.T) {
 	out := &syncBuffer{}
 	interrupts := make(chan os.Signal, 2)
-	result := runAsync(t, `trap 'printf trapped' EXIT; printf ready; while true; do :; done; printf after`, interrupts, out)
+	result := runAsync(t, `trap 'printf trapped' EXIT; printf ready; `+sleepCmd("30")+`; printf after`, interrupts, out)
 	interruptWhen(t, out, "ready", interrupts)
-	if err := waitResult(t, result); err == nil || err.Error() != "exit status 130" {
-		t.Fatalf("err = %v, want exit status 130", err)
-	}
+	waitInterrupted(t, result)
 	if got := out.String(); got != "readytrapped" {
 		t.Fatalf("output = %q", got)
 	}
 }
 
-func TestRunRunsExitTrapOnceOnNormalExit(t *testing.T) {
-	var out bytes.Buffer
-	if err := Run(nil, t.TempDir(), `trap 'printf trapped' EXIT; printf body`, nil, os.Environ(), nil, &out, &out); err != nil {
-		t.Fatal(err)
-	}
-	if got := out.String(); got != "bodytrapped" {
+func TestInterruptDuringBuiltinsStopsImmediately(t *testing.T) {
+	out := &syncBuffer{}
+	interrupts := make(chan os.Signal, 2)
+	result := runAsync(t, `printf ready; while true; do :; done; printf after`, interrupts, out)
+	interruptWhen(t, out, "ready", interrupts)
+	waitInterrupted(t, result)
+	if got := out.String(); got != "ready" {
 		t.Fatalf("output = %q", got)
 	}
 }
 
-func TestRunDoesNotReplayExitTrapInterruptedDuringCleanup(t *testing.T) {
-	out := &syncBuffer{}
-	interrupts := make(chan os.Signal, 2)
-	result := runAsync(t, `trap 'printf start; while true; do :; done' EXIT; printf body`, interrupts, out)
-	interruptWhen(t, out, "start", interrupts)
-	if err := waitResult(t, result); err == nil || err.Error() != "exit status 130" {
-		t.Fatalf("err = %v, want exit status 130", err)
-	}
-	if got := out.String(); got != "bodystart" {
-		t.Fatalf("output = %q, want the trap to run once", got)
+func TestInterruptDuringExitTrapDoesNotReplayIt(t *testing.T) {
+	for _, registration := range []string{"trap %s EXIT", "trap %s EXIT ERR", "trap -- %s EXIT", "builtin trap %s EXIT"} {
+		for _, ending := range []string{"printf body", "printf body; exit 0"} {
+			script := fmt.Sprintf(registration, `'printf start; while true; do :; done'`) + "; " + ending
+			t.Run(script, func(t *testing.T) {
+				out := &syncBuffer{}
+				interrupts := make(chan os.Signal, 2)
+				result := runAsync(t, script, interrupts, out)
+				interruptWhen(t, out, "start", interrupts)
+				waitInterrupted(t, result)
+				if got := out.String(); got != "bodystart" {
+					t.Fatalf("output = %q, want the trap to run once", got)
+				}
+			})
+		}
 	}
 }
 
-func TestRunSecondInterruptStopsExitTrap(t *testing.T) {
+func TestSecondInterruptStopsExitTrap(t *testing.T) {
 	out := &syncBuffer{}
 	interrupts := make(chan os.Signal, 2)
-	result := runAsync(t, `trap 'printf cleanup; while true; do :; done' EXIT; printf ready; while true; do :; done`, interrupts, out)
+	result := runAsync(t, `trap 'printf cleanup; while true; do :; done' EXIT; printf ready; `+sleepCmd("30"), interrupts, out)
 	interruptWhen(t, out, "ready", interrupts)
 	interruptWhen(t, out, "cleanup", interrupts)
-	if err := waitResult(t, result); err == nil || err.Error() != "exit status 130" {
-		t.Fatalf("err = %v, want exit status 130", err)
-	}
+	waitInterrupted(t, result)
 	if got := out.String(); got != "readycleanup" {
 		t.Fatalf("output = %q", got)
 	}
 }
 
-func TestRunExitTrapRunsOnceWithScriptStatus(t *testing.T) {
+func TestExitTrapSemantics(t *testing.T) {
 	cases := []struct {
 		name, script, out, err string
 	}{
+		{"normal exit", `trap 'printf trapped' EXIT; printf body`, "bodytrapped", ""},
 		{"exit builtin", `trap 'printf "[trap $?]"' EXIT; printf body; exit 3; printf after`, "body[trap 3]", "exit status 3"},
 		{"errexit", `set -e; trap 'printf "[trap $?]"' EXIT; false; printf after`, "[trap 1]", "exit status 1"},
 		{"failing last command", `trap 'printf "[trap $?]"' EXIT; false`, "[trap 1]", "exit status 1"},
 		{"reset trap", `trap 'printf trapped' EXIT; trap - EXIT; printf body`, "body", ""},
-		{"no trap", `printf body`, "body", ""},
+		{"saved and restored trap", `trap 'printf cleanup' EXIT; trap > saved; trap - EXIT; . ./saved; printf body`, "bodycleanup", ""},
+		{"background subshell trap keeps parent trap", `trap 'printf parent' EXIT; { trap 'printf child' EXIT; exit; } & wait; printf body`, "childbodyparent", ""},
+		{"background job survives until exit trap", `{ ` + sleepCmd("0.2") + `; printf done; } & pid=$!; trap 'wait "$pid"; printf ":%s" "$?"' EXIT`, "done:0", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var out bytes.Buffer
-			err := Run(nil, t.TempDir(), tc.script, nil, os.Environ(), nil, &out, &out)
-			if got := out.String(); got != tc.out {
+			got, err := run(t, tc.script)
+			if got != tc.out {
 				t.Fatalf("output = %q, want %q", got, tc.out)
 			}
 			if (err == nil && tc.err != "") || (err != nil && err.Error() != tc.err) {
 				t.Fatalf("err = %v, want %q", err, tc.err)
 			}
 		})
-	}
-}
-
-func TestRunInterruptDuringTrapStartedByExitDoesNotReplayIt(t *testing.T) {
-	out := &syncBuffer{}
-	interrupts := make(chan os.Signal, 2)
-	result := runAsync(t, `trap 'printf start; while true; do :; done' EXIT; exit 4`, interrupts, out)
-	interruptWhen(t, out, "start", interrupts)
-	if err := waitResult(t, result); err == nil || err.Error() != "exit status 130" {
-		t.Fatalf("err = %v, want exit status 130", err)
-	}
-	if got := out.String(); got != "start" {
-		t.Fatalf("output = %q, want the trap to run once", got)
 	}
 }

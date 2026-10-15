@@ -21,7 +21,8 @@ Or with Nix: see [Nix](#nix).
 `run` commands, shared scripts, and mirror `checks` are executed by an embedded bash-compatible interpreter ([mvdan.cc/sh](https://github.com/mvdan/sh)), so no `bash` binary is required and a manifest behaves the same on Linux, macOS, and Windows as long as the programs it calls exist there. Common bash syntax works: functions, arrays, `[[ ]]`, `(( ))`, `set -euo pipefail`, here-strings, and `$( )`.
 
 - Tasks inherit the environment `sd` was started with. There is no login shell, so `~/.bash_profile` and similar files are not sourced; run `sd` from the environment your tasks need (for example a devenv or `nix develop` shell).
-- `trap` supports `EXIT` and `ERR` only. Ctrl-C stops the task and runs its `EXIT` trap once; a second Ctrl-C stops the trap. The task then exits with status 130.
+- `trap` supports `EXIT` and `ERR` only, and `$(trap)` does not list the parent shell's traps.
+- Ctrl-C stops the external commands that are running and the task exits through its `EXIT` trap, which runs once. If only shell builtins are running, or on a second Ctrl-C, the task stops immediately without running the trap. Either way it exits with status 130.
 - External programs are looked up on `PATH` (with `PATHEXT` on Windows, so shims such as `npm.cmd` work).
 - On Windows, process substitution (`<( )`) is not supported, tools such as `cat`, `rm`, or `grep` must be installed and on `PATH`, and a script with a shebang cannot be executed directly: call its interpreter explicitly, for example `bash ./scripts/build.sh`.
 

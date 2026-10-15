@@ -42,14 +42,14 @@ func TestRunProjectTaskReportsExitStatus(t *testing.T) {
 	}
 }
 
-func TestRunShellTurnsInterruptIntoExitTrap(t *testing.T) {
+func TestRunShellStopsOnInterrupt(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("cannot send os.Interrupt to a process on Windows")
 	}
 	out := &lockedBuffer{}
 	result := make(chan error, 1)
 	go func() {
-		result <- runShell(t.TempDir(), `trap 'printf cleaned' EXIT; printf ready; while true; do :; done`, nil, nil, Options{Stdout: out, Stderr: out})
+		result <- runShell(t.TempDir(), `printf ready; while true; do :; done; printf after`, nil, nil, Options{Stdout: out, Stderr: out})
 	}()
 	// runShell registers for os.Interrupt before the script prints ready.
 	for deadline := time.Now().Add(5 * time.Second); !strings.Contains(out.String(), "ready"); time.Sleep(5 * time.Millisecond) {
@@ -69,7 +69,7 @@ func TestRunShellTurnsInterruptIntoExitTrap(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("task did not stop after interrupt")
 	}
-	if out.String() != "readycleaned" {
+	if out.String() != "ready" {
 		t.Fatalf("output = %q", out.String())
 	}
 }
