@@ -102,6 +102,9 @@ func RunProjectTask(ws *model.Workspace, project *model.Project, task model.Task
 		}
 		return UsageError{Message: fmt.Sprintf("task %s:%s has no run command", project.ID, task.ID)}
 	}
+	if task.RunTemplate != "" {
+		task.Run = model.ShellCommand(task.RunTemplate, task.Values)
+	}
 	command, err := composeSharedScripts(project, task)
 	if err != nil {
 		return err
@@ -142,7 +145,7 @@ func RunAggregate(ws *model.Workspace, task model.Task, opts Options) error {
 		}
 	}
 	if task.Run != "" {
-		return runShell(ws.Root, task.Run, nil, commandEnv, opts)
+		return runShell(ws.Root, model.ShellCommand(task.RunTemplate, task.Values), nil, commandEnv, opts)
 	}
 	return nil
 }

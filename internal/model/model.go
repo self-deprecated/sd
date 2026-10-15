@@ -54,6 +54,8 @@ type Task struct {
 	Mode        string                `json:"mode,omitempty" yaml:"-"`
 	Values      map[string]string     `json:"values,omitempty" yaml:"-"`
 	Passthrough bool                  `json:"passthrough,omitempty" yaml:"-"`
+	// RunTemplate is Run before RenderTask substituted values into it.
+	RunTemplate string `json:"-" yaml:"-"`
 }
 
 // TaskMode is an execution mode for a task, such as publish vs dry-run.
@@ -341,6 +343,7 @@ func RenderTask(t Task, values map[string]string) Task {
 	}
 	resolved := t
 	resolved.Values = values
+	resolved.RunTemplate = t.Run
 	resolved.Run = RenderTemplate(resolved.Run, values)
 	resolved.Dir = RenderTemplate(resolved.Dir, values)
 	if len(resolved.Env) > 0 {
@@ -401,6 +404,63 @@ func RenderTemplate(input string, values map[string]string) string {
 		out = strings.ReplaceAll(out, "{{"+key+"}}", values[key])
 	}
 	return out
+}
+
+// ShellCommand renders a run template for execution. Each {{name}} becomes a
+// reference to a shell variable assigned the value, so values are never
+// parsed as shell code; an unquoted placeholder still splits into words.
+func ShellCommand(template string, values map[string]string) string {
+	var assignments, body strings.Builder
+	refs := map[string]string{}
+	var quote byte
+	for i := 0; i < len(template); {
+		if strings.HasPrefix(template[i:], "{{") {
+			if end := strings.Index(template[i+2:], "}}"); end >= 0 {
+				key := template[i+2 : i+2+end]
+				if value, ok := values[key]; ok {
+					ref, ok := refs[key]
+					if !ok {
+						ref = fmt.Sprintf("__sd_var_%d", len(refs))
+						refs[key] = ref
+						fmt.Fprintf(&assignments, "%s=%s\n", ref, singleQuote(value))
+					}
+					if quote == '\'' {
+						body.WriteString(`'"${` + ref + `}"'`)
+					} else {
+						body.WriteString("${" + ref + "}")
+					}
+					i += end + 4
+					continue
+				}
+			}
+		}
+		c := template[i]
+		switch {
+		case quote == '\'':
+			if c == '\'' {
+				quote = 0
+			}
+		case c == '\\' && i+1 < len(template):
+			body.WriteString(template[i : i+2])
+			i += 2
+			continue
+		case quote == '"':
+			if c == '"' {
+				quote = 0
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		}
+		body.WriteByte(c)
+		i++
+	}
+	return assignments.String() + body.String()
+}
+
+// singleQuote quotes value for the shell. It writes an embedded quote as
+// '"'"' because the interpreter keeps the backslash of '\'' in assignments.
+func singleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 func mergeTaskModes(a, b map[string]TaskMode) map[string]TaskMode {
