@@ -1,11 +1,14 @@
 package mirror
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 func (p Plan) HasChanges() bool {
@@ -31,11 +34,48 @@ func ApplyPlan(plan Plan) error {
 		if isProtected(op.Path) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(plan.Destination, filepath.FromSlash(op.Path))); err != nil && !os.IsNotExist(err) {
+		dst, err := destinationPath(plan.Destination, op.Path)
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
 	return removeEmptyDirs(plan.Destination)
+}
+
+// destinationPath joins rel onto destination after checking that every
+// existing path component below destination is a real directory and that an
+// existing leaf is a regular file, so writes and deletes never follow a
+// symlink out of the mirror.
+func destinationPath(destination, rel string) (string, error) {
+	local := filepath.FromSlash(rel)
+	if !filepath.IsLocal(local) {
+		return "", fmt.Errorf("refusing to write %q: path is outside the mirror", rel)
+	}
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(local)), "/")
+	current := destination
+	for i, part := range parts {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return "", fmt.Errorf("refusing to write %s in mirror: %s is a symlink", rel, current)
+		}
+		if i < len(parts)-1 && !info.IsDir() {
+			return "", fmt.Errorf("refusing to write %s in mirror: %s is not a directory", rel, current)
+		}
+		if i == len(parts)-1 && !info.Mode().IsRegular() {
+			return "", fmt.Errorf("refusing to write %s in mirror: %s is not a regular file", rel, current)
+		}
+	}
+	return filepath.Join(destination, local), nil
 }
 
 func copyPlanFile(plan Plan, rel string) error {
@@ -49,17 +89,20 @@ func copyPlanFile(plan Plan, rel string) error {
 	if src == "" {
 		src = filepath.Join(plan.Source, filepath.FromSlash(rel))
 	}
-	dst := filepath.Join(plan.Destination, filepath.FromSlash(rel))
+	dst, err := destinationPath(plan.Destination, rel)
+	if err != nil {
+		return err
+	}
 	return copyFile(src, dst)
 }
 
 func copyFile(src, dst string) error {
-	info, err := os.Stat(src)
+	info, err := os.Lstat(src)
 	if err != nil {
 		return err
 	}
-	if info.IsDir() {
-		return fmt.Errorf("copy %s: is a directory", src)
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("copy %s: not a regular file", src)
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err

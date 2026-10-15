@@ -17,6 +17,7 @@ func TestBuildPlanSelectsFilesAppliesOverlaysAndProtectsVCS(t *testing.T) {
 	dest := filepath.Join(root, "mirrors", "demo")
 	write(t, filepath.Join(source, "README.md"), "new readme")
 	write(t, filepath.Join(source, "CONTEXT.public.md"), "public context")
+	write(t, filepath.Join(source, "docs", "guide", "intro.md"), "intro")
 	write(t, filepath.Join(source, ".env"), "secret")
 	write(t, filepath.Join(source, "node_modules", "pkg", "index.js"), "module")
 	write(t, filepath.Join(source, "apps", "mobile", "node_modules", "expo-auth-session"), "nested module")
@@ -38,7 +39,7 @@ func TestBuildPlanSelectsFilesAppliesOverlaysAndProtectsVCS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
-	assertOps(t, "creates", plan.Creates, []string{"CONTEXT.md"})
+	assertOps(t, "creates", plan.Creates, []string{"CONTEXT.md", "docs/guide/intro.md"})
 	assertOps(t, "updates", plan.Updates, []string{"README.md"})
 	assertOps(t, "deletes", plan.Deletes, []string{"old.txt"})
 
@@ -47,6 +48,7 @@ func TestBuildPlanSelectsFilesAppliesOverlaysAndProtectsVCS(t *testing.T) {
 	}
 	assertFile(t, filepath.Join(dest, "README.md"), "new readme")
 	assertFile(t, filepath.Join(dest, "CONTEXT.md"), "public context")
+	assertFile(t, filepath.Join(dest, "docs", "guide", "intro.md"), "intro")
 	assertFile(t, filepath.Join(dest, ".jj", "repo"), "mirror vcs")
 	assertAbsent(t, filepath.Join(dest, ".env"))
 	assertAbsent(t, filepath.Join(dest, "node_modules", "pkg", "index.js"))

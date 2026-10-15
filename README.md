@@ -161,6 +161,8 @@ When attached to a TTY, bare `sd mirror` opens an interactive picker for the con
 
 `include`, `exclude`, and `preserve` patterns match slash-separated paths relative to the Project or mirror root. `*` and `?` match within one path segment, and a `**` segment matches zero or more segments. Patterns match at any depth (`node_modules/**` also matches `apps/web/node_modules/...`, and `*.env` matches env files in any directory) unless they start with `/`, which anchors them to the root. An excluded or preserved directory covers everything below it. Malformed patterns are configuration errors.
 
+Mirrors export regular files only. A symlink or special file that would be exported is a plan error naming the path; exclude it or replace it with a regular file. Symlinks in the destination are only allowed inside preserved paths, and `sync` never writes or deletes through a symlink.
+
 `plan` is dry-run and truncates long text operation lists by default; use `--all-ops` or `--op-limit <n>` to control that output. JSON plans are not truncated.
 
 `check` runs the built-in blacklist scanner and the mirror's configured checks without syncing. The blacklist scanner rejects obvious sensitive paths and credential-shaped content before `sync`, `commit`, or `publish` modifies the mirror.

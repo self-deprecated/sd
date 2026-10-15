@@ -72,7 +72,7 @@ func BuildPlan(mirrorID string, root string, cfg config.MirrorConfig, destinatio
 
 	exportFiles, err := selectedFiles(source, include, exclude)
 	if err != nil {
-		return Plan{}, err
+		return Plan{}, fmt.Errorf("mirror %s: %w", mirrorID, err)
 	}
 	// Overlay targets are exported even when the source helper file is excluded.
 	for _, overlay := range cfg.Overlays {
@@ -80,9 +80,9 @@ func BuildPlan(mirrorID string, root string, cfg config.MirrorConfig, destinatio
 			return Plan{}, fmt.Errorf("mirror %s overlay requires from and to", mirrorID)
 		}
 		fromAbs := filepath.Join(source, filepath.FromSlash(overlay.From))
-		if info, err := os.Stat(fromAbs); err != nil || info.IsDir() {
+		if info, err := os.Lstat(fromAbs); err != nil || !info.Mode().IsRegular() {
 			if err == nil {
-				err = fmt.Errorf("is a directory")
+				err = fmt.Errorf("is not a regular file")
 			}
 			return Plan{}, fmt.Errorf("mirror %s overlay source %s: %w", mirrorID, overlay.From, err)
 		}
@@ -93,7 +93,7 @@ func BuildPlan(mirrorID string, root string, cfg config.MirrorConfig, destinatio
 	preserve = append(preserve, alwaysProtected...)
 	destFiles, err := destinationFiles(destination, preserve)
 	if err != nil {
-		return Plan{}, err
+		return Plan{}, fmt.Errorf("mirror %s: %w", mirrorID, err)
 	}
 	plan := Plan{MirrorID: mirrorID, WorkspaceRoot: root, Source: source, Destination: destination, Include: include, Exclude: exclude, Preserve: preserve, Checks: cfg.Checks}
 	for _, overlay := range cfg.Overlays {
@@ -127,8 +127,11 @@ func BuildPlan(mirrorID string, root string, cfg config.MirrorConfig, destinatio
 	return plan, nil
 }
 
+// selectedFiles returns the regular files to export, keyed by relative path.
+// Symlinks are never followed or exported.
 func selectedFiles(root string, include, exclude []string) (map[string]string, error) {
 	out := map[string]string{}
+	var irregular []string
 	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -148,17 +151,27 @@ func selectedFiles(root string, include, exclude []string) (map[string]string, e
 			return nil
 		}
 		if matchesAny(rel, include) && !matchesAny(rel, exclude) && !isProtected(rel) {
+			if !d.Type().IsRegular() {
+				irregular = append(irregular, rel)
+				return nil
+			}
 			out[rel] = path
 		}
 		return nil
 	}); err != nil {
 		return nil, err
 	}
+	if len(irregular) > 0 {
+		return nil, fmt.Errorf("source has symlinks or special files that would be exported; exclude them or replace them with regular files:\n  %s", strings.Join(irregular, "\n  "))
+	}
 	return out, nil
 }
 
+// destinationFiles returns the regular files in the mirror that are not
+// preserved. Mirrors may only hold symlinks inside preserved paths.
 func destinationFiles(root string, preserve []string) (map[string]string, error) {
 	out := map[string]string{}
+	var irregular []string
 	if _, err := os.Stat(root); err != nil {
 		return out, nil
 	}
@@ -181,11 +194,18 @@ func destinationFiles(root string, preserve []string) (map[string]string, error)
 			return nil
 		}
 		if !matchesAny(rel, preserve) {
+			if !d.Type().IsRegular() {
+				irregular = append(irregular, rel)
+				return nil
+			}
 			out[rel] = path
 		}
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+	if len(irregular) > 0 {
+		return nil, fmt.Errorf("destination has symlinks or special files outside preserved paths; remove them before syncing:\n  %s", strings.Join(irregular, "\n  "))
 	}
 	return out, nil
 }
