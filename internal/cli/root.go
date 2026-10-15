@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -136,11 +137,20 @@ func parseDynamicFlags(args []string, st *state) []string {
 		}
 		name, value, hasValue := strings.Cut(arg, "=")
 		switch name {
-		case "--json":
-			st.json = true
-			continue
-		case "--yes", "-y":
-			st.yes = true
+		case "--json", "--yes", "-y":
+			enabled := true
+			if hasValue {
+				var err error
+				if enabled, err = strconv.ParseBool(value); err != nil {
+					st.setParseErr(fmt.Errorf("%s expects true or false, got %q", name, value))
+					continue
+				}
+			}
+			if name == "--json" {
+				st.json = enabled
+			} else {
+				st.yes = enabled
+			}
 			continue
 		case "--mode", "--log-file", "--var":
 		default:
@@ -219,7 +229,24 @@ func newRootCommand(opts Options, st *state) *cobra.Command {
 	cmd.AddCommand(tasksCommand(opts, st))
 	cmd.AddCommand(explainCommand(opts, st))
 	cmd.AddCommand(mirrorCommand(opts, st))
+	usageArgs(cmd)
 	return cmd
+}
+
+// usageArgs makes argument-count errors from cmd and its subcommands usage
+// errors, so they exit 2 like other usage mistakes.
+func usageArgs(cmd *cobra.Command) {
+	if validate := cmd.Args; validate != nil {
+		cmd.Args = func(c *cobra.Command, args []string) error {
+			if err := validate(c, args); err != nil {
+				return runner.UsageError{Message: err.Error()}
+			}
+			return nil
+		}
+	}
+	for _, sub := range cmd.Commands() {
+		usageArgs(sub)
+	}
 }
 
 func runRoot(opts Options, st *state, args []string) error {

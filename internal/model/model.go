@@ -1,10 +1,13 @@
 package model
 
 import (
+	"bytes"
 	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"mvdan.cc/sh/v3/syntax"
 )
 
 type Workspace struct {
@@ -409,52 +412,117 @@ func RenderTemplate(input string, values map[string]string) string {
 // ShellCommand renders a run template for execution. Each {{name}} becomes a
 // reference to a shell variable assigned the value, so values are never
 // parsed as shell code; an unquoted placeholder still splits into words.
+// The script is parsed to find each placeholder's quoting context: inside
+// single quotes the reference is spliced in by closing and reopening them,
+// and in comments and quoted here-documents, which the shell does not
+// expand, the value is written as text.
 func ShellCommand(template string, values map[string]string) string {
-	var assignments, body strings.Builder
-	refs := map[string]string{}
-	var quote byte
+	type placeholder struct {
+		start, end int
+		key        string
+	}
+	var placeholders []placeholder
 	for i := 0; i < len(template); {
-		if strings.HasPrefix(template[i:], "{{") {
-			if end := strings.Index(template[i+2:], "}}"); end >= 0 {
-				key := template[i+2 : i+2+end]
-				if value, ok := values[key]; ok {
-					ref, ok := refs[key]
-					if !ok {
-						ref = fmt.Sprintf("__sd_var_%d", len(refs))
-						refs[key] = ref
-						fmt.Fprintf(&assignments, "%s=%s\n", ref, singleQuote(value))
-					}
-					if quote == '\'' {
-						body.WriteString(`'"${` + ref + `}"'`)
-					} else {
-						body.WriteString("${" + ref + "}")
-					}
-					i += end + 4
-					continue
+		start := strings.Index(template[i:], "{{")
+		if start < 0 {
+			break
+		}
+		start += i
+		end := strings.Index(template[start+2:], "}}")
+		if end < 0 {
+			break
+		}
+		end += start + 4
+		if _, ok := values[template[start+2:end-2]]; ok {
+			placeholders = append(placeholders, placeholder{start, end, template[start+2 : end-2]})
+		}
+		i = end
+	}
+	if len(placeholders) == 0 {
+		return template
+	}
+
+	// Mask placeholders with same-length words so parser offsets match.
+	masked := []byte(template)
+	for _, p := range placeholders {
+		for i := p.start; i < p.end; i++ {
+			masked[i] = 'x'
+		}
+	}
+	type span struct {
+		start, end int
+		dollar     bool
+	}
+	var singleQuoted, literal []span
+	file, err := syntax.NewParser(syntax.KeepComments(true), syntax.Variant(syntax.LangBash)).Parse(bytes.NewReader(masked), "")
+	if err == nil {
+		syntax.Walk(file, func(node syntax.Node) bool {
+			switch n := node.(type) {
+			case *syntax.SglQuoted:
+				singleQuoted = append(singleQuoted, span{int(n.Pos().Offset()), int(n.End().Offset()), n.Dollar})
+			case *syntax.Comment:
+				literal = append(literal, span{start: int(n.Pos().Offset()), end: int(n.End().Offset())})
+			case *syntax.Redirect:
+				if n.Hdoc != nil && quotedWord(n.Word) {
+					literal = append(literal, span{start: int(n.Hdoc.Pos().Offset()), end: int(n.Hdoc.End().Offset())})
 				}
 			}
-		}
-		c := template[i]
-		switch {
-		case quote == '\'':
-			if c == '\'' {
-				quote = 0
-			}
-		case c == '\\' && i+1 < len(template):
-			body.WriteString(template[i : i+2])
-			i += 2
-			continue
-		case quote == '"':
-			if c == '"' {
-				quote = 0
-			}
-		case c == '\'' || c == '"':
-			quote = c
-		}
-		body.WriteByte(c)
-		i++
+			return true
+		})
 	}
+	within := func(spans []span, offset int) (span, bool) {
+		for _, s := range spans {
+			if offset >= s.start && offset < s.end {
+				return s, true
+			}
+		}
+		return span{}, false
+	}
+
+	var assignments, body strings.Builder
+	refs := map[string]string{}
+	last := 0
+	for _, p := range placeholders {
+		body.WriteString(template[last:p.start])
+		last = p.end
+		if _, ok := within(literal, p.start); ok {
+			body.WriteString(values[p.key])
+			continue
+		}
+		ref, ok := refs[p.key]
+		if !ok {
+			ref = fmt.Sprintf("__sd_var_%d", len(refs))
+			refs[p.key] = ref
+			fmt.Fprintf(&assignments, "%s=%s\n", ref, singleQuote(values[p.key]))
+		}
+		if quoted, ok := within(singleQuoted, p.start); ok {
+			reopen := "'"
+			if quoted.dollar {
+				reopen = "$'"
+			}
+			body.WriteString(`'"${` + ref + `}"` + reopen)
+		} else {
+			body.WriteString("${" + ref + "}")
+		}
+	}
+	body.WriteString(template[last:])
 	return assignments.String() + body.String()
+}
+
+// quotedWord reports whether a here-document delimiter is quoted, which
+// stops the shell expanding the here-document.
+func quotedWord(word *syntax.Word) bool {
+	for _, part := range word.Parts {
+		switch part := part.(type) {
+		case *syntax.SglQuoted, *syntax.DblQuoted:
+			return true
+		case *syntax.Lit:
+			if strings.Contains(part.Value, "\\") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // singleQuote quotes value for the shell. It writes an embedded quote as

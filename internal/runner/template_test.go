@@ -17,6 +17,11 @@ func TestRuntimeValuesAreNeverParsedAsShellCode(t *testing.T) {
 		{"unquoted suffix", `printf '[%s]' publish{{message}}`, ` --dry-run`, `[publish][--dry-run]`},
 		{"unquoted command substitution stays literal", `printf '[%s]' {{message}}`, `$(printf injected)`, `[$(printf][injected)]`},
 		{"unknown placeholder stays literal", `printf '%s' '{{nope}}'`, `x`, `{{nope}}`},
+		{"apostrophe in a comment", "# Don't change the greeting.\nprintf '%s' '{{message}}'", `hello`, `hello`},
+		{"single quotes inside a command substitution", `printf '%s' "$(printf '%s' '{{message}}')"`, `hello`, `hello`},
+		{"ansi-c quotes", `printf '%s' $'[{{message}}]\t'`, `it's`, "[it's]\t"},
+		{"quoted heredoc gets the text", "cat <<'EOF'\n{{message}}\nEOF", `$(printf x)`, "$(printf x)\n"},
+		{"unquoted heredoc", "cat <<EOF\n[{{message}}]\nEOF", `$(printf x)`, "[$(printf x)]\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

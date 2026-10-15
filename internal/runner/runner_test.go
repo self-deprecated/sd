@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/self-deprecated/sd/internal/model"
 )
@@ -177,5 +178,40 @@ func TestMatchChangedPattern(t *testing.T) {
 		if got := matchChangedPattern(tc.pattern, tc.file); got != tc.want {
 			t.Fatalf("matchChangedPattern(%q, %q) = %v, want %v", tc.pattern, tc.file, got, tc.want)
 		}
+	}
+}
+
+func TestPromptedValuesDeriveVariables(t *testing.T) {
+	task := model.Task{ID: "deploy", Run: "printf '%s' '{{target}}-{{profile}}'", Options: map[string]model.TaskOption{
+		"profile": {Type: "string", Default: "debug"},
+		"target": {Type: "enum", Values: map[string]model.OptionValue{
+			"dev":  {Vars: map[string]string{"profile": "debug"}},
+			"prod": {Vars: map[string]string{"profile": "release"}},
+		}},
+	}}
+	var out bytes.Buffer
+	resolved, err := ResolveRuntimeInputs("app:deploy", task, Options{AllowPrompt: true, Stdin: strings.NewReader("prod\n"), Stderr: &out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Values["profile"] != "release" {
+		t.Fatalf("profile = %q, want release derived from the prompted target", resolved.Values["profile"])
+	}
+}
+
+func TestPromptStopsAtEndOfInputAfterAnInvalidValue(t *testing.T) {
+	task := model.Task{ID: "deploy", Run: "printf {{count}}", Options: map[string]model.TaskOption{"count": {Type: "integer"}}}
+	done := make(chan error, 1)
+	go func() {
+		_, err := ResolveRuntimeInputs("app:deploy", task, Options{AllowPrompt: true, Stdin: strings.NewReader("1.5"), Stderr: &bytes.Buffer{}})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "must be an integer") {
+			t.Fatalf("err = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("prompt kept reading after end of input")
 	}
 }

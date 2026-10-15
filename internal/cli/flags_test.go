@@ -71,3 +71,29 @@ func TestTaskExitStatusBecomesSdExitStatus(t *testing.T) {
 		t.Fatalf("code = %d stderr = %q, want 3", code, stderr)
 	}
 }
+
+func TestBooleanFlagValues(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, ".sd", "tasks.yaml"), "version: 1\nproject: {id: app, dir: .}\ntasks:\n  dangerous: {danger: true, run: printf RAN}\n")
+	for _, args := range [][]string{{"app", "dangerous", "--yes=false"}, {"app", "dangerous", "-y=0"}} {
+		stdout, stderr, code := execute(t, root, args...)
+		if code != 2 || stdout != "" || !strings.Contains(stderr, "requires --yes") {
+			t.Fatalf("%v: stdout = %q code = %d stderr = %q, want confirmation refusal", args, stdout, code, stderr)
+		}
+	}
+	if stdout, _, code := execute(t, root, "app", "dangerous", "--yes=true"); code != 0 || stdout != "RAN" {
+		t.Fatalf("--yes=true: stdout = %q code = %d", stdout, code)
+	}
+	if _, stderr, code := execute(t, root, "app", "dangerous", "--yes=garbage"); code != 2 || !strings.Contains(stderr, "--yes") {
+		t.Fatalf("--yes=garbage: code = %d stderr = %q", code, stderr)
+	}
+}
+
+func TestArgumentCountErrorsAreUsageErrors(t *testing.T) {
+	root := flagsWorkspace(t)
+	for _, args := range [][]string{{"explain"}, {"tasks", "a", "b"}, {"projects", "x"}} {
+		if _, stderr, code := execute(t, root, args...); code != 2 {
+			t.Fatalf("%v: code = %d stderr = %q, want 2", args, code, stderr)
+		}
+	}
+}

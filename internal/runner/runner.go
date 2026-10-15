@@ -226,7 +226,7 @@ func resolveRuntimeInputs(label string, task model.Task, opts Options) (model.Ta
 		if !opts.AllowPrompt {
 			return model.Task{}, UsageError{Message: missingRuntimeMessage(label, missing)}
 		}
-		prompted, err := promptRuntimeInputs(label, task, values, missing, opts)
+		prompted, err := promptRuntimeInputs(label, task, missing, opts)
 		if err != nil {
 			return model.Task{}, err
 		}
@@ -291,19 +291,20 @@ func missingRuntimeMessage(label string, missing []string) string {
 	return fmt.Sprintf("task %s missing required runtime variable: %s", label, strings.Join(parts, ", "))
 }
 
-func promptRuntimeInputs(label string, task model.Task, values map[string]string, missing []string, opts Options) (map[string]string, error) {
+// promptRuntimeInputs asks for each missing value and re-resolves the task's
+// values after every answer, treating answers like --var values so variables
+// derived from them update.
+func promptRuntimeInputs(label string, task model.Task, missing []string, opts Options) (map[string]string, error) {
 	reader := bufio.NewReader(opts.Stdin)
-	prompted := map[string]string{}
-	for key, value := range values {
-		prompted[key] = value
-	}
+	answers := map[string]string{}
+	var values map[string]string
 	for _, name := range missing {
 		option := task.Options[name]
 		for {
 			fmt.Fprint(opts.Stderr, runtimePrompt(name, option))
-			answer, err := reader.ReadString('\n')
-			if err != nil && !errors.Is(err, io.EOF) {
-				return nil, err
+			answer, readErr := reader.ReadString('\n')
+			if readErr != nil && !errors.Is(readErr, io.EOF) {
+				return nil, readErr
 			}
 			answer = strings.TrimSpace(answer)
 			if answer == "" && option.Default != "" {
@@ -311,26 +312,27 @@ func promptRuntimeInputs(label string, task model.Task, values map[string]string
 			}
 			if answer == "" {
 				fmt.Fprintf(opts.Stderr, "value required for %s\n", name)
-				if errors.Is(err, io.EOF) {
+				if readErr != nil {
 					return nil, UsageError{Message: fmt.Sprintf("task %s missing required runtime variable: %s", label, name)}
 				}
 				continue
 			}
 			if err := validateRuntimeValue(name, answer, option); err != nil {
 				fmt.Fprintln(opts.Stderr, err)
-				if errors.Is(err, io.EOF) {
+				if readErr != nil {
 					return nil, UsageError{Message: fmt.Sprintf("task %s %s", label, err.Error())}
 				}
 				continue
 			}
-			prompted[name] = answer
-			if prompted, err = model.ResolveOptionValues(task.Options, prompted); err != nil {
+			answers[name] = answer
+			var err error
+			if values, err = model.ResolveOptionValues(task.Options, task.Values, opts.Vars, answers); err != nil {
 				return nil, UsageError{Message: fmt.Sprintf("task %s: %s", label, err)}
 			}
 			break
 		}
 	}
-	return prompted, nil
+	return values, nil
 }
 
 func runtimePrompt(name string, option model.TaskOption) string {
