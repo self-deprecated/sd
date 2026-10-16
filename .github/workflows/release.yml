@@ -20,6 +20,9 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
+      - name: Check the flake version matches the tag
+        run: grep -qF "version = \"${GITHUB_REF_NAME#v}\";" flake.nix
+
       - name: Test
         run: go test ./...
 
@@ -32,3 +35,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Writes the cask and Scoop manifest to the tap and bucket repos.
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          # Developer ID signing and notarization; skipped while unset.
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
