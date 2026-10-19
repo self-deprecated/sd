@@ -13,16 +13,18 @@ permissions:
 jobs:
   homebrew:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - run: brew install --cask self-deprecated/tap/sd
+      - uses: Homebrew/actions/setup-homebrew@main
+      - run: brew install self-deprecated/tap/sd
       - run: sd --version
-      - name: Run a task
-        run: |
-          mkdir -p "$RUNNER_TEMP/demo/.sd"
-          printf 'version: 1\nproject: {id: demo, dir: .}\ntasks:\n  hello: {run: printf hello}\n' > "$RUNNER_TEMP/demo/.sd/tasks.yaml"
-          cd "$RUNNER_TEMP/demo"
-          test "$(sd hello)" = hello
+      # Runs the formula's own test: --version plus a demo task.
+      - run: brew test self-deprecated/tap/sd
+      - run: brew audit --strict self-deprecated/tap/sd
 
   scoop:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'

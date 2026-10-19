@@ -13,7 +13,7 @@ It discovers `.sd/tasks.yaml` manifests from the current directory upward, so it
 macOS or Linux with [Homebrew](https://brew.sh):
 
 ```sh
-brew install --cask self-deprecated/tap/sd
+brew install self-deprecated/tap/sd
 ```
 
 Windows with [Scoop](https://scoop.sh):
@@ -23,7 +23,7 @@ scoop bucket add self-deprecated https://github.com/self-deprecated/scoop-bucket
 scoop install self-deprecated/sd
 ```
 
-The fully qualified names matter: Homebrew and Scoop's main bucket both carry an unrelated `sd` (a find-and-replace tool).
+Homebrew builds `sd` from source with Go, so no signing or quarantine workaround is involved. The fully qualified names matter: Homebrew and Scoop's main bucket both carry an unrelated `sd` (a find-and-replace tool).
 
 With Go, or from the archives on the [releases page](https://github.com/self-deprecated/sd/releases), which include shell completions:
 

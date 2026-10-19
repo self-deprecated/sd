@@ -64,29 +64,6 @@ release:
     name: sd
   prerelease: auto
 
-homebrew_casks:
-  - name: sd
-    repository:
-      owner: self-deprecated
-      name: homebrew-tap
-      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
-    directory: Casks
-    homepage: https://github.com/self-deprecated/sd
-    description: Project task dispatcher for .sd/tasks.yaml manifests
-    binaries: [sd]
-    completions:
-      bash: completions/sd.bash
-      zsh: completions/sd.zsh
-      fish: completions/sd.fish
-    hooks:
-      post:
-        # Unsigned binaries need the quarantine flag dropped for macOS to run
-        # them. Remove this hook after the first notarized release.
-        install: |
-          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/sd"]
-          end
-
 scoops:
   - name: sd
     repository:
